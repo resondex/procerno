@@ -1,5 +1,6 @@
 "use client";
 
+import { SeldomTag } from "./seldom_tag";
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useParams } from "next/navigation";
 import type {
@@ -361,7 +362,10 @@ function LiftLines({ args, sides }: { args: JourneyArgument[]; sides: [string, s
             key={a.code}
             className={`grid grid-cols-[minmax(7.5rem,1fr)_1fr_2.75rem] items-center gap-x-2.5 gap-y-0.5 text-[13px] ${thin ? "opacity-60" : ""}`}
           >
-            <span className="text-ink">{a.code}</span>
+            <span className="text-ink">
+              {a.code}
+              {a.seldom && <SeldomTag />}
+            </span>
             <div className="relative h-2.5" aria-hidden>
               <span className="absolute inset-y-[-2px] left-1/2 w-px bg-line" />
               <span

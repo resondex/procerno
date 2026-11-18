@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useState } from "react";
 import { Tip } from "./table";
+import { SeldomTag } from "./seldom_tag";
 import type { ReactNode } from "react";
 import type {
   AnswerRef,
@@ -853,7 +854,10 @@ export function TableView({ table }: { table: PanelTable }) {
           <tbody>
             {table.rows.map((r) => (
               <tr key={r.label} className="border-t border-line/70">
-                <td className="py-1.5 pr-2 text-ink">{r.label}</td>
+                <td className="py-1.5 pr-2 text-ink">
+                  {r.label}
+                  {r.seldom && <SeldomTag />}
+                </td>
                 {r.cells.map((c, i) => (
                   <td key={i} className={`whitespace-nowrap py-1.5 pl-3 text-right ${c && "t" in c && !("refs" in c && c.refs?.length) ? `${T.cap} text-ink-3` : "text-ink"}`}>
                     {table.mark && i === table.mark.col && c && !isSpan(c) ? (

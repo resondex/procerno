@@ -91,7 +91,9 @@ export function argumentsSentence(s: Pick<JourneyStation, "arguments" | "argumen
   const f = s.arguments.find((a) => a.forYou);
   const g = s.arguments.find((a) => !a.forYou);
   if (!f && !g) return s.argumentsNote ?? "Too few answers on either side to compare the arguments.";
-  const parts = [...(f ? [`"${f.code}" comes up more ${yes}`] : []), ...(g ? [`"${g.code}" comes up more ${no}`] : [])];
+  // A lead that is seldom raised says so (the engine leads with a common argument whenever one exists).
+  const tail = (a: { seldom?: boolean }) => (a.seldom ? ", though it is seldom raised" : "");
+  const parts = [...(f ? [`"${f.code}" comes up more ${yes}${tail(f)}`] : []), ...(g ? [`"${g.code}" comes up more ${no}${tail(g)}`] : [])];
   return `${capFirst(parts.join("; "))}.`;
 }
 

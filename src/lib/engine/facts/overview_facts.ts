@@ -34,7 +34,7 @@ import { factBook, WHAT_TO_BUY_ALL, type FactBook, type Scope } from "./fact";
 import { attachProducts } from "./products";
 import { selectionBook, type AnySelection, type SelMember } from "./selections";
 import { fc, parseDerived, parseFactId, type FactCell } from "./statements";
-import { OVERVIEW_FLOORS as OF } from "./measure_book";
+import { OVERVIEW_FLOORS as OF, seldomOf } from "./measure_book";
 import { isWallWording } from "../wall_wording";
 import { isDefaultCondition } from "../condition_groups";
 import { containsSeq, famTokens } from "../brand_family";
@@ -197,7 +197,9 @@ export function summaryFromFacts(data: ViewData, rf: RunFacts): Summary {
   const brands = list.map((b) => brandOf(b.key, b.name)).sort((a, b) => b.chosen.k - a.chosen.k || b.mentioned.k - a.mentioned.k || a.name.localeCompare(b.name));
   const target = brands.find((b) => b.key === T)!;
 
-  // Argument lift (ruling 2): wins = the answers that pick you, others = another pick of a brand in analysis.
+  // Argument lift (ruling 2): wins = the answers that pick you, others = another pick of a brand in analysis. One rule
+  // everywhere (FLOORS.liftMinSide a side, no incidence gate); an argument raised in under FLOORS.seldomShare of the two
+  // sides' answers is kept, marked seldom (seldomOf). An argument raised on neither side is not a lift row.
   const wins = F("share_of_picks", "you", WTB);
   const reasonLift: ReasonLift[] = [];
   const otherPicks = F("slice_share", "ai/slice:pick:other", WTB);
@@ -205,11 +207,10 @@ export function summaryFromFacts(data: ViewData, rf: RunFacts): Summary {
     const codes = new Set<string>();
     for (const f of rowsOf(rf, WTB)) for (const a of f.args ?? []) codes.add(a);
     for (const code of [...codes].sort()) {
-      const inc = F("argues", `ai/arg:${code}`, { ...WTB, when: "args" });
-      if (inc.n === 0 || inc.k / inc.n < OF.liftMinIncidence) continue;
       const w = F("argues_when_picked", `you/arg:${code}`, WTB);
       const o = F("argues_when_other_picked", `you/arg:${code}`, WTB);
-      reasonLift.push({ code, wins: w, others: o, lift: (w.n ? w.k / w.n : 0) - (o.n ? o.k / o.n : 0) });
+      if (w.k + o.k === 0) continue;
+      reasonLift.push({ code, wins: w, others: o, lift: (w.n ? w.k / w.n : 0) - (o.n ? o.k / o.n : 0), seldom: seldomOf(w, o) });
     }
     reasonLift.sort((a, b) => b.lift - a.lift || a.code.localeCompare(b.code));
   }

@@ -1,5 +1,6 @@
 import type { BrandSummaryView, SummaryBrand } from "./brand_summary";
-import { pctFine, type InsightInputs } from "./summary_insights";
+import { FLOORS, seldomOf, liftLead } from "./facts/measure_book";
+import { clearsConcentration, pctFine, type InsightInputs } from "./summary_insights";
 import { cell, poolOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { buildResolver } from "./brand_resolve";
 import { productNoun } from "./summary_insights";
@@ -44,10 +45,8 @@ const F = (label: string, c: RateCell, value = pct(c)): Row => ({ label, value, 
 
 /** A card read at the same floor as the map's sides (MIN_SIDE). */
 const MIN_SIDE = 20;
-/** The analysis map's watch threshold (WATCH_ENGINE_SHARE), the detector's unit test. */
-const WATCH_ENGINE_SHARE = 0.4;
 
-export type Lift = { code: string; wins: RateCell; others: RateCell; lift: number };
+export type Lift = { code: string; wins: RateCell; others: RateCell; lift: number; seldom: boolean };
 
 /* ---------------------------------- brand --------------------------------- */
 
@@ -115,7 +114,7 @@ export function supplyLine(s: BrandSummaryView, inputs: InsightInputs, key: stri
   if (vs.size >= 2) for (const u of vs.values()) if (u.models.length >= 2) units.push(u);
   const best = units
     .map((u) => ({ u, picks: cell(u.models.reduce((x, m) => x + (b.byModel[m] ?? 0), 0), b.total), base: u.answers / s.answers }))
-    .filter((x) => rate(x.picks) >= WATCH_ENGINE_SHARE && x.picks.low > x.base)
+    .filter((x) => clearsConcentration(x.picks, x.base))
     .sort((x, y) => rate(y.picks) - y.base - (rate(x.picks) - x.base) || x.u.label.localeCompare(y.u.label))[0];
   if (!best) return null;
   return {
@@ -163,11 +162,14 @@ export function topQuestionRow(src: CardSources, key: string): Row | null {
   return { label: "Picks from its top question", value: pct(cell(k, qTot)), tip: `${k} of ${qTot}: "${q.text.replace(/\s+/g, " ").slice(0, 90)}"` };
 }
 
-/** The argument a brand wins on and the one it loses on (its lift list's two ends). */
+/** The argument a brand wins on and the one it loses on (its lift list's two ends; each end the strongest row that is
+ * not seldom raised, when one exists - liftLead). */
 export function liftEnds(src: CardSources, key: string): { win: Lift; lose: Lift | null } | null {
   const lift = src.liftOf(key);
   if (!lift.length) return null;
-  return { win: lift[0], lose: lift.length > 1 ? lift[lift.length - 1] : null };
+  const win = liftLead(lift.filter((l) => l.lift > 0))?.row ?? lift[0];
+  const lose = lift.length > 1 ? liftLead([...lift].reverse().filter((l) => l.lift < 0))?.row ?? lift[lift.length - 1] : null;
+  return { win, lose: lose === win ? null : lose };
 }
 
 /** The brand card's headline sentence. */
@@ -178,7 +180,7 @@ export function brandHeadline(name: string, b: SummaryBrand): string {
 /* The dossiers' per-brand argument lift (moved from brief_legacy_inputs.ts, unchanged): over the open-choice pool.
  * Share of answers arguing each code when `key` is picked vs when another in-category brand is, over the headline pool
  * (brand_summary's lift, for any brand). */
-function liftForBrand(data: ViewData, request: ViewRequest, key: string): { code: string; wins: RateCell; others: RateCell; lift: number }[] {
+function liftForBrand(data: ViewData, request: ViewRequest, key: string): Lift[] {
   const resolve = buildResolver(data.dictionary, data.judged, data.names);
   const rows = poolOf(data, "headline", request).rows;
   const facts = rows.map(({ code }) => {
@@ -191,16 +193,16 @@ function liftForBrand(data: ViewData, request: ViewRequest, key: string): { code
   });
   const wins = facts.filter((f) => f.pick === key && f.reasons !== null);
   const others = facts.filter((f) => f.pick !== null && f.pick !== key && f.reasons !== null);
-  if (wins.length < 20 || others.length < 20) return [];
-  const withR = facts.filter((f) => f.reasons !== null);
-  const counts = new Map<string, number>();
-  for (const f of withR) for (const r of f.reasons!) counts.set(r, (counts.get(r) ?? 0) + 1);
-  return [...counts.entries()]
-    .filter(([, k]) => k / withR.length >= 0.02)
-    .map(([code]) => {
+  // The one lift rule (FLOORS.liftMinSide a side, no incidence gate; seldomOf marks a rarely raised row).
+  if (wins.length < FLOORS.liftMinSide || others.length < FLOORS.liftMinSide) return [];
+  const codes = new Set<string>();
+  for (const f of facts) if (f.reasons !== null) for (const r of f.reasons) codes.add(r);
+  return [...codes]
+    .map((code) => {
       const w = cell(wins.filter((f) => f.reasons!.includes(code)).length, wins.length);
       const o = cell(others.filter((f) => f.reasons!.includes(code)).length, others.length);
-      return { code, wins: w, others: o, lift: rate(w) - rate(o) };
+      return { code, wins: w, others: o, lift: rate(w) - rate(o), seldom: seldomOf(w, o) };
     })
+    .filter((l) => l.wins.k + l.others.k > 0)
     .sort((a, b) => b.lift - a.lift);
 }

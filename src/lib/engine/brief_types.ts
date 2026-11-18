@@ -79,7 +79,7 @@ export interface AnswerCard {
    * as a sub-line ("31% of your picks · 1% of rivals' picks"); counts in
    * `tip` only. cardText states each label, both shares and the signed
    * points ("+30 points"). */
-  lifts?: { label: string; value: number; wins?: string; others?: string; tip?: string }[];
+  lifts?: { label: string; value: number; wins?: string; others?: string; tip?: string; seldom?: boolean }[];
   /** The sub-line's two side words ("your picks", "rivals' picks"). */
   liftSides?: [string, string];
   /** Fact layer step 5, part 2: where each number of the headline and the rows sits, with its fact id ("headline",

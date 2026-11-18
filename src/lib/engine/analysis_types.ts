@@ -246,6 +246,9 @@ export interface LiftItem {
   /** am15: one answer that picks you (the lift's first side) and one that
    * picks a rival (its second), both arguing the code, when available. */
   receipts?: AnswerRef[];
+  /** Raised in under FLOORS.seldomShare of the two sides' answers together (measure_book seldomOf): the row stays,
+   * tagged "seldom raised", and a sentence names it as the lead only when no other row on its side is common. */
+  seldom: boolean;
 }
 
 export interface ConditionItem {
@@ -623,7 +626,8 @@ export interface PanelTable {
   mark?: { col: number; pct: number; note: string };
   columns: string[];
   style: "compare" | "bars";
-  rows: { label: string; cells: (PanelNum | PanelSpan | null)[] }[];
+  /** `seldom`: the row is an argument raised in under FLOORS.seldomShare of the two sides' answers (drawn "seldom raised"). */
+  rows: { label: string; cells: (PanelNum | PanelSpan | null)[]; seldom?: boolean }[];
   /** The selection the rows are (fact layer). Never drawn. */
   selection?: string;
 }

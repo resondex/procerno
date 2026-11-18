@@ -9,7 +9,7 @@ import { NOWHERE_CLEAR, AVG_COMP, CLOSE_PTS, GAP_TAKEAWAY, TAKEAWAY_TAGS, TAG_FU
 import { ROW_NAME } from "./question_names";
 import type { AnswerFact, AnswerFactSet, QuestionType } from "./facts/answer_facts";
 import { scopeKey, WHAT_TO_BUY_ALL, type Fact, type FactBook, type Scope } from "./facts/fact";
-import { MEASURE_BY_ID, cardKey, printOf } from "./facts/measure_book";
+import { FLOORS, MAP_FLOORS, MEASURE_BY_ID, cardKey, liftLead, leadsFirst, printOf } from "./facts/measure_book";
 import { averageCompetitor, type AnySelection, type CondFlavor, type CondRow, type SelMember, type SelectionBook, type WeighsColumn } from "./facts/selections";
 import {
   F,
@@ -158,7 +158,7 @@ export const PICKED_MIN = 5;
 export const COMP_TOP = 5;
 export const GAP_MIN = 0.1;
 const BRAND_FLOOR = 5;
-const ARGS_MIN = 10;
+const ARGS_MIN = FLOORS.argsMin;
 const CASE_MIN = 10;
 
 /* ------------------------------- inputs ------------------------------- */
@@ -222,7 +222,7 @@ export interface PanelHelpers {
   facts?: PickFacts;
 }
 
-const WALL_ROW_MIN = 5;
+const WALL_ROW_MIN = MAP_FLOORS.wallMin;
 
 /* ------------------------------- numbers ------------------------------- */
 
@@ -779,8 +779,9 @@ function factPickPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
 
   // What the answer weighs.
   const weighs = factWeighs(inp, fc, ctx, [{ say: "come up here", unit: "answers", tone: "neutral" }], WEIGHS_SUB_ALL);
-  const negs = inp.lifts.filter((l) => l.value < 0).sort((a, b) => a.value - b.value).slice(0, 1);
-  const poss = inp.lifts.filter((l) => l.value > 0).sort((a, b) => b.value - a.value).slice(0, 1);
+  // The lead each way: the strongest row that is not seldom raised (liftLead), when one exists.
+  const negs = leadsFirst(inp.lifts.filter((l) => l.value < 0).sort((a, b) => a.value - b.value)).slice(0, 1);
+  const poss = leadsFirst(inp.lifts.filter((l) => l.value > 0).sort((a, b) => b.value - a.value)).slice(0, 1);
   const weighsComp =
     negs.length || poss.length
       ? factWeighs(
@@ -1778,7 +1779,7 @@ function factCommitsDetail(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
   const pb = sel.selection("pick_brands", "you", scope);
   const who = factSec(COMMITS_TEXT.who.title, COMMITS_TEXT.who.sub, "neutral", (pb.members as SelMember[]).map((b) => ({ label: b.name, num: fx(fc, "share_of_picks", subj(fc, b.key), scope, "answers that name one pick", pf(b.name)) })), COMMITS_TEXT.who.few);
   const picked = knOf(cm.here!)!.k;
-  const vs = sel.selection("vendors", "ai", scope, { min: ROW_MIN });
+  const vs = sel.selection("vendors", "ai", scope, { min: ARGS_MIN });
   const vendor = picked < ROW_MIN ? null : factSec(COMMITS_TEXT.vendor.title, COMMITS_TEXT.vendor.sub, "neutral", (vs.members as SelMember[]).map((v) => ({ label: v.name, num: fx(fc, "commit_rate", "ai", { ...scope, vendor: v.name }, `${v.name} answers`, pf(h.brand)) })), COMMITS_TEXT.vendor.few);
   const sections = [instead, who, vendor].filter((x): x is PanelDetailSection => !!x);
   const dk = knOf(depends)!.k;
@@ -1937,8 +1938,8 @@ function factHabitPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const rivals = members.map((m) => factRivalSmall(inp, fc, ctx, m, "Suggested instead", { when: "as something to try", alt: `rec:${m.key}` }));
   // What each side weighs, led by the cell's top lift each way (the Map's lift list decides the leads and whether
   // the block is two-sided); too few answers either way, the unsided version.
-  const pos = inp.lifts.filter((l) => l.value > 0).sort((x, y) => y.value - x.value)[0];
-  const neg = inp.lifts.filter((l) => l.value < 0).sort((x, y) => x.value - y.value)[0];
+  const pos = liftLead(inp.lifts.filter((l) => l.value > 0).sort((x, y) => y.value - x.value))?.row;
+  const neg = liftLead(inp.lifts.filter((l) => l.value < 0).sort((x, y) => x.value - y.value))?.row;
   const enough = (when: string) => book.rows({ ...scope, when }).filter((f) => f.args !== null).length >= ARGS_MIN;
   const unsided = () => factWeighs(inp, fc, ctx, [{ say: "come up here", unit: "answers", tone: "neutral" }], WEIGHS_SUB_ALL);
   const weighs =
@@ -2141,8 +2142,8 @@ function leaveNoDest(inp: PanelCellInput): { leave: number; noDest: number } {
  * few answers on both sides, the unsided version (the old weighsSides rule, on facts). */
 function doubtWeighs(inp: PanelCellInput, fc: FactCard, ctx: Ctx, fav: { title: string; say: string; slice: string }, unfav: { title: string; say: string; slice: string }): PanelWeighs | undefined {
   const { book } = fc.F;
-  const pos = inp.lifts.filter((l) => l.value > 0).sort((a, b) => b.value - a.value)[0];
-  const neg = inp.lifts.filter((l) => l.value < 0).sort((a, b) => a.value - b.value)[0];
+  const pos = liftLead(inp.lifts.filter((l) => l.value > 0).sort((a, b) => b.value - a.value))?.row;
+  const neg = liftLead(inp.lifts.filter((l) => l.value < 0).sort((a, b) => a.value - b.value))?.row;
   const enough = (when: string) => book.rows({ ...fc.scope, when }).filter((f) => f.args !== null).length >= ARGS_MIN;
   const unsided = () => factWeighs(inp, fc, ctx, [{ say: "come up here", unit: "answers", tone: "neutral" }], WEIGHS_SUB_ALL);
   if ((!pos && !neg) || (!enough(fav.slice) && !enough(unfav.slice))) return unsided();
@@ -2694,7 +2695,7 @@ function factAwarenessDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
     const nowhere = fx(fc, "routed_none", "ai", scope, "answers", vf);
     const adjK = knOf(adjacent)!.k;
     const names = sel.selection("adjacent_names", "ai", scope);
-    const vs = vendors(ROW_MIN, scope);
+    const vs = vendors(ARGS_MIN, scope);
     const sections = [
       factSec(ROUTED_TEXT.rest.title, ROUTED_TEXT.rest.sub, "neutral", [
         { label: ROUTED_TEXT.adjacent(h.plural), num: adjacent },
@@ -2709,7 +2710,7 @@ function factAwarenessDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
     if (p.compare) detailsComp.category = d;
   }
   if (p.kind === "learning" && step("anybrand")) {
-    const vs = vendors(ROW_MIN, scope);
+    const vs = vendors(ARGS_MIN, scope);
     const anyFind = (r: PoolRow) => (r.code.mentions ?? []).find((m) => counted(m.brand, h))?.brand ?? h.brand;
     const sections = [selSec(factSec(ANYBRAND_TEXT.vendor.title, ANYBRAND_TEXT.vendor.sub, "neutral", (vs.members as SelMember[]).map((v) => ({ label: v.name, num: fx(fc, "names_any_brand", "ai", { ...scope, vendor: v.name }, `${v.name} answers`, anyFind) })), ANYBRAND_TEXT.vendor.few), vs.id)].filter((x): x is PanelDetailSection => !!x);
     const share = all ? knOf(step("anybrand")!.here!)!.k / all : 0;
@@ -2726,7 +2727,7 @@ function factAwarenessDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
     const others = sel.selection("named_brands", "you", scope, { slice: WITHOUT, top: 5 });
     const first = sel.selection("first_named", "you", { ...scope, when: ANY }, { youFirst: true, top: 3 });
     const prods = ctx.ladder ? sel.selection("product_names", "you", { ...scope, when: "named:you" }, { brand: T, top: 5 }) : null;
-    const vs = vendors(ROW_MIN, { ...scope, when: ANY });
+    const vs = vendors(ARGS_MIN, { ...scope, when: ANY });
     const sections = [
       selSec(factSec(NAMEDWHEN_TEXT.others.title, NAMEDWHEN_TEXT.others.sub, "bad", (others.members as SelMember[]).map((x) => ({ label: x.name, num: fx(fc, "named", x.key, { ...scope, when: WITHOUT }, "answers that name a brand but not you", surfF(x.key, x.name)) })), NAMEDWHEN_TEXT.others.few), others.id),
       selSec(factSec(NAMEDWHEN_TEXT.first.title, NAMEDWHEN_TEXT.first.sub, "neutral", (first.members as SelMember[]).map((x) => ({ label: x.key === T ? "You" : x.name, num: fx(fc, "slice_share", `ai/slice:first:${x.key}`, { ...scope, when: ANY }, "answers that name a brand", () => x.name) })), NAMEDWHEN_TEXT.first.few), first.id),
@@ -2767,14 +2768,16 @@ function factCriteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const local = !!roomSides && roomSides.you >= ARGS_MIN && roomSides.other >= ARGS_MIN;
   const S: Scope = local ? roomScope! : WHAT_TO_BUY_ALL;
   const liftSel = local ? sel.selection("arg_lift", "you", S, { lift: "local" }) : roomScope ? null : sel.selection("arg_lift", "you", S, { lift: "summary" });
-  type L = { key: string; wins: { k: number; n: number }; others: { k: number; n: number }; lift: number };
+  type L = { key: string; wins: { k: number; n: number }; others: { k: number; n: number }; lift: number; seldom: boolean };
   const lift = (liftSel?.members ?? []) as unknown as L[];
   const noRead = !!roomScope && !local;
   const winners = lift
     .filter((l) => l.lift > 0 && cell(l.wins.k, l.wins.n).low > cell(l.others.k, l.others.n).high && !taughtSet.has(l.key))
     .sort((a, b) => b.wins.k / Math.max(1, b.wins.n) - a.wins.k / Math.max(1, a.wins.n) || a.key.localeCompare(b.key));
   const pickNum = (code: string, you: boolean) => fx(fc, you ? "argues_when_picked" : "argues_when_other_picked", `you/arg:${code}`, S, "answers that pick", () => code);
-  const untaught = winners.slice(0, 2);
+  // Named in the claim: winners not seldom raised first (the one lift rule); a lead that is seldom raised says so.
+  const untaught = leadsFirst(winners).slice(0, 2);
+  const untaughtSeldom = !!untaught[0]?.seldom ? (untaught.length > 1 ? ", though they are seldom raised" : ", though it is seldom raised") : "";
   const when = local || inp.pooled ? "when it picks you" : "when it picks you, across all buyers";
   const opener = inp.pooled ? "When buyers ask" : `When the buyer in "${inp.label}" asks`;
   const gapSpans = untaught.map((w, i) => F(i === 0 ? upperFirst(cname(w.key, h)) : cname(w.key, h), pickNum(w.key, true)));
@@ -2783,7 +2786,7 @@ function factCriteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     listNameSpans(top5.slice(0, 3).map((c) => F(cname(c, h), taughtNum(c)))),
     ".",
     untaught.length
-      ? join(" ", listNameSpans(gapSpans), untaught.length > 1 ? `, which come up most ${when}, are seldom on its list.` : `, which comes up most ${when}, is seldom on its list.`)
+      ? join(" ", listNameSpans(gapSpans), untaught.length > 1 ? `, which come up most ${when}${untaughtSeldom}, are seldom on its list.` : `, which comes up most ${when}${untaughtSeldom}, is seldom on its list.`)
       : noRead
         ? " It picks you for this buyer too seldom to say what wins here."
         : top5.length
@@ -2812,10 +2815,12 @@ function factCriteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     },
   ];
   const liftBy = new Map(lift.map((l) => [l.key, l]));
-  const tableCodes = [...new Set([...winners.slice(0, 4).map((w) => w.key), ...top5.filter((c) => liftBy.has(c))])]
-    .map((c) => ({ c, taught: taughtSet.has(c), lift: liftBy.get(c)?.lift ?? 0 }))
-    .sort((a, b) => Number(a.taught) - Number(b.taught) || b.lift - a.lift || a.c.localeCompare(b.c))
-    .slice(0, 6);
+  // Capped lists: common rows first, seldom rows only in free slots (leadsFirst).
+  const tableCodes = leadsFirst(
+    [...new Set([...leadsFirst(winners).slice(0, 4).map((w) => w.key), ...top5.filter((c) => liftBy.has(c))])]
+      .map((c) => ({ c, taught: taughtSet.has(c), lift: liftBy.get(c)?.lift ?? 0, seldom: !!liftBy.get(c)?.seldom }))
+      .sort((a, b) => Number(a.taught) - Number(b.taught) || b.lift - a.lift || a.c.localeCompare(b.c))
+  ).slice(0, 6);
   const table: PanelTable | undefined =
     tableCodes.length && lift.length
       ? {
@@ -2825,7 +2830,7 @@ function factCriteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
           columns: [`When it picks another ${h.noun}`, "When it picks you", "Taught in"],
           ...(top5.length ? { mark: { col: 2, ...checklistMark(taughtNum(top5[top5.length - 1]), top5.length) } } : {}),
           style: "compare",
-          rows: tableCodes.map(({ c }) => ({ label: clabel(c, h), cells: [pickNum(c, false), pickNum(c, true), taughtNum(c)] })),
+          rows: tableCodes.map(({ c }) => ({ label: clabel(c, h), cells: [pickNum(c, false), pickNum(c, true), taughtNum(c)], ...(liftBy.get(c)?.seldom ? { seldom: true } : {}) })),
           ...(liftSel ? { selection: liftSel.id } : {}),
         }
       : undefined;

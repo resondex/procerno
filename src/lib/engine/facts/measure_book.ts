@@ -34,19 +34,12 @@ import { famTokens } from "../brand_family";
 /* ------------------------------- floors ------------------------------- */
 
 /**
- * The floors and tests, in one table. The values are today's card values (panel_build.ts, panel_tags.ts); nothing
- * reads this table yet. Conflicting values found in the inventory (ENGINE_INVENTORY_2026-11-17.md section 4 and
- * the cards report), listed so the choice is visible when the screens move onto this table:
- *  - minimum answers: 20 on a card and in the Overview's findings (PANEL_MIN, MIN_BASE), but 20 a side in the
- *    Map's lift and contest tests (MIN_SIDE), 10 a side for weighs and AI-company sections (ARGS_MIN), 5 for an
- *    explanation (DETAIL_MIN), 3 for a drawn row (ROW_MIN);
- *  - an AI-company breakdown: 3 answers per company in one card section (vendorItems), 10 in the others;
- *  - "which argument wins": 20 a side with 2% incidence; 10 a side with 5%; 10 a side with no floor; and two
- *    more variants (five in all);
- *  - "one AI company supplies the picks": the Map's watch badge (40% of picks, 10 picks) against the Overview's
- *    finding (40% of picks, 3 engines);
- *  - "converts": the visibility view's level line (ruling 11) against The diagnosis' quarter-of-named rule;
- *  - "close": under 3 points OR inside the Wilson range on the cards, ranges apart (non-overlap) in the findings.
+ * The floors and tests, in one table. Every screen reads these; a screen keeps no local copy of a floor for an idea
+ * listed here. The rulings on floors that used to differ between screens (Tyler, 2026-11-18) are written into the
+ * values below: one "argument that comes up more when you win" (liftMinSide + seldomShare, no incidence gate), one
+ * AI-company breakdown floor (argsMin), one floor for a sentence that advises on a fixed situation (fixedAdviseMin),
+ * one floor for who buyers are sent to (takerMin / takerShare); "converts" is the visibility view's level line
+ * (ruling 11). The two differences kept on purpose are listed at FLOOR_CONFLICTS.
  */
 export const FLOORS = {
   /** A card with fewer answers is thin and drops its tags. */
@@ -55,8 +48,21 @@ export const FLOORS = {
   rowMin: 3,
   /** An explanation needs this many answers. */
   detailMin: 5,
-  /** A side needs this many answers carrying arguments (weighs, AI-company sections). */
+  /** A side needs this many answers carrying arguments (weighs); an AI company needs this many answers to be listed in
+   * any card section that breaks answers down by AI company. */
   argsMin: 10,
+  /** "An argument comes up more when you win" (every screen): at least this many answers on each side - the answers
+   * that pick the brand (or take its side) and the answers that pick another brand (or take the other side). No
+   * incidence gate: an argument raised in under seldomShare of the two sides' answers together is kept and marked
+   * `seldom` (seldomOf). */
+  liftMinSide: 10,
+  seldomShare: 0.05,
+  /** A row is tagged a fixed situation at MAP_FLOORS.wallMin answers; a sentence that ADVISES on it (do not contest it)
+   * needs this many answers on the row. One floor with the Overview's specific away wording (awaySpecificMin). */
+  fixedAdviseMin: 15,
+  /** Who buyers are sent to (a worry's exit, a settled card's redirect): at least this many answers and this share. */
+  takerMin: 3,
+  takerShare: 0.2,
   /** A brand is listed among a card's competitors with this many picks. */
   brandFloor: 5,
   /** A case table needs this many answers on a side, and a gap of this many points between sides. */
@@ -114,8 +120,9 @@ export const OVERVIEW_FLOORS = {
   ownDefenseTiedPts: 0.05,
   /** away_condition: its lead row needs this many answers (the themed path's MIN_BASE) ... */
   awayLeadMin: 20,
-  /** ... and a specific wording (a blocker brand, a fixed situation) this many (was 15 grouped rules). */
-  awaySpecificMin: 15,
+  /** ... and a specific wording (a blocker brand, a fixed situation) this many - the floor for advising on a fixed
+   * situation (FLOORS.fixedAdviseMin). */
+  awaySpecificMin: FLOORS.fixedAdviseMin,
   /** A brand the AI almost never picks (the blocker clause). */
   blockerShare: 0.02,
   /** assigned_exception: the exception in this many lost answers and this share of them. */
@@ -136,9 +143,8 @@ export const OVERVIEW_FLOORS = {
   leakProblemShare: 0.5,
   /** leave_no_exit: leave answers naming nowhere at this share. */
   noExitShare: 0.5,
-  /** The argument lift (the reasonLift list): 20 answers a side, an argument in 2% of the pool. */
-  liftMinAnswers: 20,
-  liftMinIncidence: 0.02,
+  /** The argument lift (the reasonLift list): FLOORS.liftMinSide answers a side, no incidence gate (seldomOf). */
+  liftMinAnswers: FLOORS.liftMinSide,
 } as const;
 
 /** The Map's cell floors (analysis_map.ts), as they were. */
@@ -150,14 +156,18 @@ export const MAP_FLOORS = {
   /** Badges: picks outside the category, own cheaper option, one assistant. */
   leakShare: 0.1,
   inhouseShare: 0.5,
+  /** Watch: one assistant supplies this share of the cell's brand side, from this many answers, AND the 95% range of
+   * that share clears the assistant's share of the cell's answers (the Overview finding's test, clearsConcentration in
+   * summary_insights.ts). */
   watchEngineShare: 0.4,
   watchEngineMin: 10,
-  /** A cell's lift list: 10 answers a side, an argument in 5% of the two sides, top 8. */
-  liftMin: 10,
-  liftMinIncidence: 0.05,
+  /** A cell's lift list: FLOORS.liftMinSide answers a side, no incidence gate (seldomOf), top 8. */
+  liftMin: FLOORS.liftMinSide,
   liftTop: 8,
-  /** A fixed situation on the away side needs this many answers. */
+  /** A row is tagged a fixed situation with this many answers ... */
   wallMin: 5,
+  /** ... and the cell advises on it (the wall line, the move box, the triage reason) with this many. */
+  wallAdviseMin: FLOORS.fixedAdviseMin,
   /** Casting: "leads" within this margin of the top brand's share of picks. */
   defaultMargin: 0.05,
   /** Position.brands: a brand with this many picks in the contest is listed; at most 5. */
@@ -169,31 +179,46 @@ export const MAP_FLOORS = {
   /** Lost with an exception: 20 lost answers, half of them still stating a case for you. */
   excMinLost: 20,
   excMinShare: 0.5,
-  /** The exit taker on a worry: at least this many answers and this share. */
-  exitMin: 3,
-  exitShare: 0.2,
-  /** The settled cells' redirect taker. */
-  redirectShare: 0.1,
-  /** The criteria cell's what-to-buy lift for one buyer: 10 picks a side. */
-  roomLiftMin: 10,
+  /** Who buyers are sent to - the exit taker on a worry and the settled cells' redirect taker: one floor. */
+  exitMin: FLOORS.takerMin,
+  exitShare: FLOORS.takerShare,
+  redirectShare: FLOORS.takerShare,
+  /** The criteria cell's what-to-buy lift for one buyer: FLOORS.liftMinSide picks a side. */
+  roomLiftMin: FLOORS.liftMinSide,
 } as const;
 
 /**
- * Floors that differ for the same idea (kept as they are, listed for the ruling):
- *  - "an argument comes up more when you win": the Overview's lift needs 20 answers a side and 2% incidence
- *    (liftMinAnswers / liftMinIncidence); a Map cell's lift needs 10 a side and 5% (MAP_FLOORS.liftMin /
- *    liftMinIncidence); a buyer's criteria cell reads 10 picks a side (roomLiftMin) with no incidence floor.
- *  - "one assistant supplies the picks": the Map's watch badge (40% of the cell's brand side, 10 answers) and the
- *    Overview's finding (40% of a brand's picks, 20 picks, 3 assistants, the range clearing the assistant's share of
- *    questions).
- *  - "a fixed situation": the Map's wall needs 5 answers on the row (wallMin); the Overview's away finding needs 15 on a specific
- *    wording (awaySpecificMin).
- *  - the exit / redirect taker: 3 answers and 20% on a worry (exitShare), 3 answers and 10% on a settled cell
- *    (redirectShare).
- *  - "lost with an exception": the Map cell needs 20 lost answers and half of them stating a case for you; the
- *    Overview's finding needs 15 answers stating its one condition and 20% of the lost answers.
+ * The two floors that differ for the same-sounding idea ON PURPOSE (Tyler, 2026-11-18); every other former conflict is
+ * one floor above.
+ *  - "lost with an exception": the Map cell needs 20 lost answers and half of them stating a case for you
+ *    (MAP_FLOORS.excMinLost / excMinShare); the Overview's finding needs 15 answers stating its one condition and 20% of
+ *    the lost answers (OVERVIEW_FLOORS.excMinAnswers / excMinShare). Two different measures: the cell asks whether the
+ *    lost answers still make a case at all, the finding whether one condition does.
+ *  - "close": a card calls two shares close under FLOORS.closePts points or inside each other's 95% range (cards
+ *    describe); a finding needs ranges apart (non-overlapping, FLOORS.apartZ) to fire (findings decide).
  */
 export const FLOOR_CONFLICTS = true;
+
+/** "Seldom raised": an argument raised in under FLOORS.seldomShare of the answers on the two sides together (the
+ * answers that pick the brand and the answers that pick another brand, or the two sides of a verdict). The one
+ * definition every lift list uses; a seldom row stays in its list, marked. */
+export function seldomOf(w: { k: number; n: number }, o: { k: number; n: number }): boolean {
+  const n = w.n + o.n;
+  return n === 0 ? true : (w.k + o.k) / n < FLOORS.seldomShare;
+}
+
+/** The argument a sentence names as THE one that comes up more when the brand wins (sign 1) or when another brand does
+ * (sign -1): the first in `rows` (already in the caller's order of strength) that is not seldom raised; only when every
+ * row is seldom, the first of them, flagged so the sentence can say so. */
+export function liftLead<T extends { seldom: boolean }>(rows: T[]): { row: T; seldom: boolean } | null {
+  const row = rows.find((r) => !r.seldom) ?? rows[0];
+  return row ? { row, seldom: row.seldom } : null;
+}
+
+/** `rows` with every row that is not seldom raised first, each group in its own order (a list a sentence names from). */
+export function leadsFirst<T extends { seldom: boolean }>(rows: T[]): T[] {
+  return [...rows.filter((r) => !r.seldom), ...rows.filter((r) => r.seldom)];
+}
 
 /* ------------------------------- types ------------------------------- */
 

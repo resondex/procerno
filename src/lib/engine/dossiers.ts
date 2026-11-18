@@ -51,6 +51,8 @@ export interface DossierArg {
   others: string;
   /** do7: up to 2 answers where the brand is the pick and the code is argued (different engines). */
   receipts?: AnswerRef[];
+  /** Raised in under FLOORS.seldomShare of the two sides' answers together (measure_book seldomOf). */
+  seldom: boolean;
 }
 
 export interface Dossier {
@@ -289,7 +291,7 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
 
       // The arguments: the lift list's two ends, drawn as bars with their shares.
       const ends = liftEnds(src, b.key);
-      const toArg = (l: Lift): DossierArg => ({ label: l.code, value: Math.round(l.lift * 100), wins: pct(l.wins), others: pct(l.others) });
+      const toArg = (l: Lift): DossierArg => ({ label: l.code, value: Math.round(l.lift * 100), wins: pct(l.wins), others: pct(l.others), seldom: l.seldom });
       const args: DossierArg[] = ends ? [ends.win, ...(ends.lose ? [ends.lose] : [])].map(toArg) : [];
       // do7: each argument row's receipts - answers picking this brand that argue it.
       const mineRows = picksBy.get(b.key) ?? [];
@@ -389,7 +391,7 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
 // sides pivot on") that read as contradictions across the two columns.
 // do6 (2026-11-09): option D - dossiers carry pick receipts for the one-panel slide-over; themes shared with the map via reason_themes.
 // do7 (2026-11-10): the one-panel redesign - rooms (its share beside yours per open-choice buying situation, from the map's brands), argsAll receipts, theme receipts and away routes; the routes and default lines say what sends buyers away instead of "reason".
-const DOSSIERS_VERSION = "do11"; // do11 (2026-11-13): grouped reasons tagged fixed by their own name only (reason_themes). // do10 (2026-11-13): the never-asked callout reads matchup_gap.ts (one rule with the unasked_rival finding) and points at the "Ask this matchup" action; // do9 (2026-11-12): a rival page's examples name only its own products; // do8 (2026-11-12): theme examples ranked one-way-first and by fit, with `to`
+const DOSSIERS_VERSION = "do12"; // do12 (2026-11-18, the floor rulings): a brand's argument lift on the one rule (10 answers a side, no incidence gate, rows marked seldom; each end led by a row not seldom raised). // do11 (2026-11-13): grouped reasons tagged fixed by their own name only (reason_themes). // do10 (2026-11-13): the never-asked callout reads matchup_gap.ts (one rule with the unasked_rival finding) and points at the "Ask this matchup" action; // do9 (2026-11-12): a rival page's examples name only its own products; // do8 (2026-11-12): theme examples ranked one-way-first and by fit, with `to`
 // The fold (2026-11-09): dossiers embed map cells and summary numbers, so
 // their versions ride the key (see analysis_map's fold note).
 const DOSSIERS_KEY_VERSION = `${DOSSIERS_VERSION}.${ANALYSIS_MAP_VERSION}.${BRAND_SUMMARY_VERSION}`;

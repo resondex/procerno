@@ -35,6 +35,7 @@
  * nothing renders nothing. Links print as plain text.
  */
 
+import { SeldomTag } from "./seldom_tag";
 import { createContext, Fragment, useContext, useEffect, useRef, useState } from "react";
 import {
   BRIEF_FRAMES,
@@ -675,7 +676,10 @@ function CardLifts({ lifts, sides }: { lifts: NonNullable<AnswerCard["lifts"]>; 
         const v = Math.round(l.value);
         return (
           <div key={l.label} className="pb-lift">
-            <span className="pb-lift-l">{l.label}</span>
+            <span className="pb-lift-l">
+              {l.label}
+              {l.seldom && <SeldomTag />}
+            </span>
             <span className="pb-lift-bar" aria-hidden>
               <span className="pb-lift-mid" />
               <span

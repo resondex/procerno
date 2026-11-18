@@ -5,13 +5,13 @@ import { isWallWording } from "./wall_wording";
 import { EXC_MIN_LOST, EXC_MIN_SHARE, EXC_ROWS } from "./assigned_exception";
 import { ROW_NAME } from "./question_names";
 import { findingMove, type MoveNames } from "./finding_moves";
-import { commitSentence, insightBar, insightInputs, productNoun, rankedInsights, type InsightInputs } from "./summary_insights";
+import { commitSentence, clearsConcentration, insightBar, insightInputs, productNoun, rankedInsights, type InsightInputs } from "./summary_insights";
 import { BRAND_SUMMARY_VERSION, computeBrandSummary, sharedBrandSummary, type BrandSummaryView, type Insight, type ReasonLift } from "./brand_summary";
 import { buildPanels, buildRivalAcross, knOf, type PanelCellInput } from "./panel_build";
 import type { QuestionType } from "./facts/answer_facts";
 import type { Scope } from "./facts/fact";
 import type { SelMember } from "./facts/selections";
-import { MAP_FLOORS } from "./facts/measure_book";
+import { MAP_FLOORS, seldomOf, liftLead, leadsFirst } from "./facts/measure_book";
 import { extremeWords, fc, finish, isFactCell, parseFactId, pd, pfine, pw, stripDeep, type FactCell, type StmtNums } from "./facts/statements";
 import { cardCondRows, refsFor, sharedRunFacts, type RunFacts } from "./facts/overview_facts";
 import { scopeSentences, wordingIndex } from "./panel_filter";
@@ -189,7 +189,6 @@ const INHOUSE_SHARE = MAP_FLOORS.inhouseShare;
 const WATCH_ENGINE_SHARE = MAP_FLOORS.watchEngineShare;
 const WATCH_ENGINE_MIN = MAP_FLOORS.watchEngineMin;
 const LIFT_MIN = MAP_FLOORS.liftMin;
-const LIFT_MIN_INCIDENCE = MAP_FLOORS.liftMinIncidence;
 const LIFT_TOP = MAP_FLOORS.liftTop;
 const COND_TOP = 6;
 /** Both-sides rows shown per cell (the card's rows stated on the other side too). */
@@ -200,6 +199,7 @@ const BOTH_ROWS = new Set(["open", "social", "premium", "leavers", "h2h"]);
 const SENDS_THEME_TOP = 8;
 export const RECEIPTS = 5;
 const WALL_MIN = MAP_FLOORS.wallMin;
+const WALL_ADVISE_MIN = MAP_FLOORS.wallAdviseMin;
 const DEFAULT_MARGIN = MAP_FLOORS.defaultMargin;
 const BRAND_FLOOR = MAP_FLOORS.brandFloor;
 const BRANDS_TOP = MAP_FLOORS.brandsTop;
@@ -219,6 +219,8 @@ const pct = (c: RateCell) => pctOf(rate(c));
 const norm = (s: string) => s.trim().toLowerCase();
 const tipC = (c: RateCell) => `${c.k} of ${c.n}`;
 /** am11: a lift row's two shares for its sub-line, in the brief's formatting. */
+/** A named lead argument that is seldom raised says so (ruling 1): ", though it is seldom raised". */
+const seldomTail = (x: { seldom: boolean } | null | undefined) => (x?.seldom ? ", though it is seldom raised" : "");
 const liftShares = (l: { wins: RateCell; others: RateCell }) => ({ wins: pct(l.wins), others: pct(l.others), tip: `${tipC(l.wins)} · ${tipC(l.others)}` });
 
 /* The wall detector lives in wall_wording.ts (shared with the summary insights). */
@@ -280,7 +282,8 @@ interface CellSpec {
   line?: string | null;
   conceded?: { agree: FactCell; goAheadOfAgreed: FactCell };
   verdictOverride?: { verdict: CellVerdict; lean: number };
-  criteria?: { winnerTaught: string | null; winnerUntaught: string | null; taught: string[] };
+  /** The named winners, each with whether it is seldom raised (the sentence then says so). */
+  criteria?: { winnerTaught: string | null; winnerUntaught: string | null; taught: string[]; seldom: string[] };
   settledWatch?: boolean;
   exitFallback?: { name: string; n: number }[];
   figures?: Figure[];
@@ -338,6 +341,9 @@ export interface CastingFacts {
 
 export interface AnalysisMapDebug {
   walls: WallProbe[];
+  /** Harness only: every capped lift list as it qualified (all rows, in rank order, each with its seldom flag) and the
+   * labels shown after the cap - the check that no seldom row is shown while a common one was cut. */
+  capped?: { where: string; cap: number; all: { label: string; seldom: boolean }[]; shown: string[] }[];
   casting: CastingFacts;
   /** Harness only: insights to place through the tensions' cell matcher
    * (default: the summary's served insights); results land in `placements`.
@@ -625,7 +631,8 @@ export async function computeAnalysisMap(
 
   // What to look for: per buying situation when room-pinned, else wide. Ruling 7: what wins reads what-to-buy answers.
   const allLift = summary.reasonLift;
-  /** One buyer's own what-to-buy lift (am66): 10 picks a side, else none; facts on that buyer's What to buy card. */
+  /** One buyer's own what-to-buy lift (am66): FLOORS.liftMinSide picks a side, else none; facts on that buyer's What to
+   * buy card; a row raised in under FLOORS.seldomShare of the two sides' answers is marked seldom. */
   const roomLift = (room: string, subjectKey: string = targetKey): ReasonLift[] | null => {
     const sc: Scope = { ...WTB_S, situation: room };
     if (!has(sc)) return null;
@@ -638,7 +645,7 @@ export async function computeAnalysisMap(
       .map((code) => {
         const w = F("argues_when_picked", `${s0}/arg:${code}`, sc);
         const o = F("argues_when_other_picked", `${s0}/arg:${code}`, sc);
-        return { code, wins: w, others: o, lift: rate(w) - rate(o) };
+        return { code, wins: w, others: o, lift: rate(w) - rate(o), seldom: seldomOf(w, o) };
       })
       .filter((l) => l.wins.k + l.others.k > 0)
       .sort((a, b) => b.lift - a.lift || a.code.localeCompare(b.code));
@@ -655,8 +662,9 @@ export async function computeAnalysisMap(
   const CRT: Scope = { types: ["criteria"] };
   const criteriaSpec = (key: string, label: string, sc: Scope, wide: boolean, own: ReasonLift[] | null = null): CellSpec => {
     const lift = own ?? allLift;
-    const winners = lift.filter((l) => l.lift > 0 && l.wins.low > l.others.high).slice(0, 3);
-    const losers = [...lift].reverse().filter((l) => l.lift < 0 && l.others.low > l.wins.high).slice(0, 3);
+    // Capped lists: common rows first, seldom rows only in free slots (leadsFirst).
+    const winners = leadsFirst(lift.filter((l) => l.lift > 0 && l.wins.low > l.others.high)).slice(0, 3);
+    const losers = leadsFirst([...lift].reverse().filter((l) => l.lift < 0 && l.others.low > l.wins.high)).slice(0, 3);
     const liftRow = new Map(lift.map((l) => [l.code, l]));
     // The card's own "what to look for" list (the checklist selection).
     const top5 = (sel.selection("checklist", "ai", sc).members as SelMember[]).map((m) => m.key);
@@ -672,7 +680,10 @@ export async function computeAnalysisMap(
       else if (loseTaught.length === 0) { verdict = "yours"; lean = 1; }
       else { verdict = "contested"; lean = Math.sign(winTaught.length - loseTaught.length); }
     }
-    const untaught = winners.find((w) => !top5.includes(w.code)) ?? null;
+    // Naming: the first winner that is not seldom raised leads (liftLead); the verdict above reads the list as it is.
+    const untaught = leadsFirst(winners).find((w) => !top5.includes(w.code)) ?? null;
+    const winLead = leadsFirst(winTaught)[0];
+    const loseLead = leadsFirst(loseTaught)[0];
     const items: LiftItem[] = [...new Set([...top5, ...winners.map((w) => w.code), ...losers.map((l) => l.code)])]
       .filter((c) => liftRow.has(c))
       .map((c) => {
@@ -681,10 +692,17 @@ export async function computeAnalysisMap(
           label: top5.includes(c) ? `${c} (taught ${pw(taughtRate(c))})` : `${c} (seldom taught)`,
           value: Math.round(l.lift * 100),
           ...liftShares(l),
+          seldom: l.seldom,
         };
       })
-      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
-      .slice(0, LIFT_TOP);
+      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+    const itemsCapped = leadsFirst(items).slice(0, LIFT_TOP);
+    if (debug) {
+      (debug.capped ??= []).push({ where: `criteria ${key} items`, cap: LIFT_TOP, all: items.map((r) => ({ label: r.label, seldom: r.seldom })), shown: itemsCapped.map((r) => r.label) });
+      const qual = (side: ReasonLift[]) => side.map((l) => ({ label: l.code, seldom: l.seldom }));
+      (debug.capped ??= []).push({ where: `criteria ${key} winners`, cap: 3, all: qual(lift.filter((l) => l.lift > 0 && l.wins.low > l.others.high)), shown: winners.map((w) => w.code) });
+      (debug.capped ??= []).push({ where: `criteria ${key} losers`, cap: 3, all: qual([...lift].reverse().filter((l) => l.lift < 0 && l.others.low > l.wins.high)), shown: losers.map((l) => l.code) });
+    }
     const taughtText = top5.slice(0, 3).map((c) => `${c} (${pw(taughtRate(c))})`).join(", ");
     const anyOf = (codes: string[]) => (codes.length ? `argany:${codes.map((c) => encodeURIComponent(c)).join(",")}` : "!args&args");
     const youSlice = anyOf(winTaught.map((w) => w.code));
@@ -694,8 +712,8 @@ export async function computeAnalysisMap(
       you: F("slice_share", `ai/slice:${youSlice}`, sc), them: F("slice_share", `ai/slice:${themSlice}`, sc), youSlice, themSlice,
       taker: { name: "The taught checklist", kind: TAKER.undecided },
       verdictOverride: { verdict, lean },
-      criteria: { winnerTaught: winTaught[0]?.code ?? null, winnerUntaught: untaught?.code ?? null, taught: top5 },
-      lifts: items,
+      criteria: { winnerTaught: winLead?.code ?? null, winnerUntaught: untaught?.code ?? null, taught: top5, seldom: [untaught, winLead].filter((x) => x?.seldom).map((x) => x!.code) },
+      lifts: itemsCapped,
       liftNote: "Each argument's lift when buyers ask what to buy (argued when you are picked minus when another brand is), labelled with how often this cell's criteria answers teach it.",
       note: (v) =>
         v === "nocall"
@@ -712,9 +730,9 @@ export async function computeAnalysisMap(
                 : `For ${label}, what the AI tells buyers to look for`;
         if (v === "nocall") return `${where} leads with ${taughtText || "no single argument"} - too little to set against your winning arguments.`;
         if (v === "theirs")
-          return `${where} leads with ${taughtText}${untaught ? ` - while ${untaught.code}, an argument that comes up more when you win, is seldom taught` : ", none of them an argument that comes up more when you win"}.`;
-        if (v === "yours") return `${where} leads with ${taughtText}, including ${winTaught[0].code} - an argument that comes up more when you win.`;
-        return `${where} leads with ${taughtText}: ${winTaught[0].code} helps you, ${loseTaught[0].code} favors the rival picks.`;
+          return `${where} leads with ${taughtText}${untaught ? ` - while ${untaught.code}, an argument that comes up more when you win${seldomTail(untaught)}, is seldom taught` : ", none of them an argument that comes up more when you win"}.`;
+        if (v === "yours") return `${where} leads with ${taughtText}, including ${winLead.code} - an argument that comes up more when you win${seldomTail(winLead)}.`;
+        return `${where} leads with ${taughtText}: ${winLead.code} helps you${seldomTail(winLead)}, ${loseLead.code} favors the rival picks${seldomTail(loseLead)}.`;
       },
     };
   };
@@ -1124,8 +1142,11 @@ export async function computeAnalysisMap(
       if (inputs.taught.length) figs.push({ label: "Most often taught", value: listVal(inputs.taught.slice(0, 8).map((t) => `${t.code} ${pw(t.rate)}`)) });
       const lift = summary.reasonLift;
       const top5 = new Set(inputs.taught.slice(0, 5).map((t) => t.code));
-      for (const l of [lift[0], ...lift.filter((x) => top5.has(x.code) && x.lift < 0)].filter(Boolean))
-        figs.push({ label: `${l.code}: how much more often it comes up when ${brand} is picked than when another brand is`, value: pd("diff_signed", [l.wins, l.others]), tip: `${tipC(l.wins)} picks; ${tipC(l.others)} other picks` });
+      // The lead winning argument (not seldom raised when one exists - liftLead), then the taught ones that favor rivals;
+      // a seldom-raised row says so in its label.
+      const lead = liftLead(lift.filter((x) => x.lift > 0))?.row ?? lift[0];
+      for (const l of [...new Set([lead, ...lift.filter((x) => top5.has(x.code) && x.lift < 0)])].filter(Boolean))
+        figs.push({ label: `${l.code}${l.seldom ? " (seldom raised)" : ""}: how much more often it comes up when ${brand} is picked than when another brand is`, value: pd("diff_signed", [l.wins, l.others]), tip: `${tipC(l.wins)} picks; ${tipC(l.others)} other picks` });
       addFigs(criteriaAll, figs);
     }
     // Spotting the problem: ruling 5 - answers pointing to something adjacent, of every answer.
@@ -1158,25 +1179,26 @@ export async function computeAnalysisMap(
   /* -- per-cell lifts, brands and exceptions (what the cards read before they are built) -- */
   const refRows = (rows: PoolRow[]) => receiptsOf(rows);
   /** One cell's lift list (MAP_FLOORS): an argument's share among the wins against among the others, each its own
-   * fact on the cell's scope. */
+   * fact on the cell's scope; FLOORS.liftMinSide answers a side, no incidence gate - a row raised in under
+   * FLOORS.seldomShare of the two sides' answers is kept and marked seldom. */
   const liftsOf = (sc: Scope, wins: string, others: string): LiftItem[] => {
     const wn = F("slice_share", `ai/slice:${andArgs(wins)}`, sc);
     const on = F("slice_share", `ai/slice:${andArgs(others)}`, sc);
     if (wn.k < LIFT_MIN || on.k < LIFT_MIN) return [];
-    const both = `${andArgs(wins)}|${andArgs(others)}`;
-    const total = wn.k + on.k;
     const codes = [...new Set(book.rows(sc).flatMap((f) => f.args ?? []))].sort();
-    return codes
+    const rows = codes
       .map((code) => {
-        const inc = F("argues", `ai/arg:${code}`, { ...sc, when: both });
-        if (inc.k / total < LIFT_MIN_INCIDENCE) return null;
         const wc = F("argues", `ai/arg:${code}`, { ...sc, when: andArgs(wins) });
         const oc = F("argues", `ai/arg:${code}`, { ...sc, when: andArgs(others) });
-        return { label: code, value: Math.round((rate(wc) - rate(oc)) * 100), ...liftShares({ wins: wc, others: oc }), _w: wc, _o: oc };
+        if (wc.k + oc.k === 0) return null;
+        return { label: code, value: Math.round((rate(wc) - rate(oc)) * 100), ...liftShares({ wins: wc, others: oc }), seldom: seldomOf(wc, oc), _w: wc, _o: oc };
       })
       .filter((l): l is NonNullable<typeof l> => !!l && l.value !== 0)
-      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value) || a.label.localeCompare(b.label))
-      .slice(0, LIFT_TOP)
+      .sort((a, b) => Math.abs(b.value) - Math.abs(a.value) || a.label.localeCompare(b.label));
+    // The cap never lets a seldom row push out a common one (leadsFirst: common rows first, seldom rows fill).
+    const shown = leadsFirst(rows).slice(0, LIFT_TOP);
+    if (debug) (debug.capped ??= []).push({ where: `lifts ${JSON.stringify(sc)} ${wins} / ${others}`, cap: LIFT_TOP, all: rows.map((r) => ({ label: r.label, seldom: r.seldom })), shown: shown.map((r) => r.label) });
+    return shown
       .map(({ _w, _o, ...l }) => {
         const refs = liftRefs(l.label, _w, _o);
         return refs.length ? { ...l, receipts: refs } : l;
@@ -1197,8 +1219,9 @@ export async function computeAnalysisMap(
   const pooledOpenLifts = (selected: LiftItem[]): LiftItem[] => {
     const rl = summary.reasonLift;
     if (!rl.length) return selected;
-    const first = rl[0];
-    const last = rl[rl.length - 1];
+    // The lead each way (the rows a sentence names: the first that is not seldom raised).
+    const first = liftLead(rl.filter((l) => l.lift > 0))?.row ?? rl[0];
+    const last = liftLead([...rl].reverse().filter((l) => l.lift < 0))?.row ?? rl[rl.length - 1];
     const taughtTop = new Set(inputs.taught.slice(0, 5).map((t) => t.code));
     const cited = [first.code, last.code, ...rl.filter((l) => taughtTop.has(l.code) && l.lift < 0).map((l) => l.code)];
     const byCode = new Map(rl.map((l) => [l.code, l]));
@@ -1212,9 +1235,9 @@ export async function computeAnalysisMap(
         continue;
       }
       const refs = liftRefs(code, l.wins as FactCell, l.others as FactCell);
-      items.push({ label: code, value: (l.lift < 0 ? -1 : 1) * Math.round(Math.abs(l.lift) * 100), ...liftShares(l), ...(refs.length ? { receipts: refs } : {}) });
+      items.push({ label: code, value: (l.lift < 0 ? -1 : 1) * Math.round(Math.abs(l.lift) * 100), ...liftShares(l), seldom: l.seldom, ...(refs.length ? { receipts: refs } : {}) });
     }
-    return items.sort((a, b) => Math.abs(b.value) - Math.abs(a.value) || a.label.localeCompare(b.label));
+    return leadsFirst(items.sort((a, b) => Math.abs(b.value) - Math.abs(a.value) || a.label.localeCompare(b.label)));
   };
   /** One brand's funnel inside one contest (the rival panel's lead read). */
   const brandRead = (sc: Scope, key: string): BrandRead => {
@@ -1526,11 +1549,13 @@ export async function computeAnalysisMap(
         const towardRows = pc?.toward ?? [];
         const awayRows = pc?.away ?? [];
         const badges: CellBadge[] = [];
-        // Fixed situations: the card's top-3 away rows, possession-shaped.
+        // Fixed situations: the card's top-3 away rows, possession-shaped. The row's "fixed" tag needs WALL_MIN answers
+        // (the card's own tag); the cell ADVISES on it (the wall line, the move, the triage reason) only at
+        // WALL_ADVISE_MIN (FLOORS.fixedAdviseMin - one floor with the Overview's specific away wording).
         const wallRows: PanelCondition[] = [];
         awayRows.slice(0, 3).forEach((r, i) => {
           const n = knOf(r.share)?.k ?? 0;
-          const isWall = n >= WALL_MIN && !!r.wall;
+          const isWall = n >= WALL_ADVISE_MIN && !!r.wall;
           if (isWall) wallRows.push(r);
           if (n >= WALL_MIN) walls.push({ cellId: id, label: r.text, n, rank: i + 1, wall: isWall, samples: [r.text] });
         });
@@ -1540,8 +1565,13 @@ export async function computeAnalysisMap(
         // Watch: one assistant carries the brand side (each assistant's share of that side - one fact each).
         let engineWatch: { model: string; share: number; c: FactCell } | null = null;
         if (s.you.k >= WATCH_ENGINE_MIN) {
-          const per = rf.engines.map((m) => ({ m, c: F("slice_share", `ai/slice:eng:${m}`, { ...s.scope, when: s.youSlice }) })).sort((a, b) => b.c.k - a.c.k || a.m.localeCompare(b.m));
-          if (per[0] && rate(per[0].c) >= WATCH_ENGINE_SHARE) engineWatch = { model: per[0].m, share: rate(per[0].c), c: per[0].c };
+          // The share floor and the Overview finding's range test (clearsConcentration): the 95% range of the assistant's
+          // share of the brand side must clear its share of the cell's answers.
+          const per = rf.engines
+            .map((m) => ({ m, c: F("slice_share", `ai/slice:eng:${m}`, { ...s.scope, when: s.youSlice }), base: F("slice_share", `ai/slice:eng:${m}`, s.scope) }))
+            .sort((a, b) => b.c.k - a.c.k || a.m.localeCompare(b.m));
+          const top = per[0];
+          if (top && rate(top.c) >= WATCH_ENGINE_SHARE && clearsConcentration(top.c, rate(top.base))) engineWatch = { model: top.m, share: rate(top.c), c: top.c };
         }
         if (engineWatch || s.settledWatch) badges.push("watch");
 
@@ -1590,13 +1620,14 @@ export async function computeAnalysisMap(
         const median = !!topAway && tk(topAway) >= 2 * tk(topToward) && (knOf(topAway.share)?.n ?? 0) > 0 && tk(topAway) / knOf(topAway.share)!.n >= 0.1;
         let triage: Triage;
         let why: string;
+        const critSeldom = (code: string) => (s.criteria?.seldom.includes(code) ? ", though it is seldom raised" : "");
         const youS = s.you;
         const themS = s.them;
         const engineName = engineWatch ? engineLabel.get(engineWatch.model) ?? engineWatch.model : "";
         if (nothingToPush) {
           triage = "earned";
           why = s.criteria!.winnerTaught
-            ? `${s.criteria!.winnerTaught} comes up more when you win and the AI already teaches it here - no winning argument is missing.`
+            ? `${s.criteria!.winnerTaught} comes up more when you win${critSeldom(s.criteria!.winnerTaught)} and the AI already teaches it here - no winning argument is missing.`
             : "No argument here comes up more when you win - there is nothing measured to push into these answers yet.";
         } else if (verdict === "yours" || (status !== "deficit" && verdict === "contested" && lean > 0)) {
           if (s.settledWatch) {
@@ -1631,7 +1662,7 @@ export async function computeAnalysisMap(
           } else if (s.criteria) {
             triage = "proof_missing";
             why = s.criteria.winnerUntaught
-              ? `${s.criteria.winnerUntaught} comes up more when you win but is missing from what the AI teaches here; it teaches ${s.criteria.taught.slice(0, 3).join(", ")}.`
+              ? `${s.criteria.winnerUntaught} comes up more when you win${critSeldom(s.criteria.winnerUntaught)} but is missing from what the AI teaches here; it teaches ${s.criteria.taught.slice(0, 3).join(", ")}.`
               : `What the AI teaches here (${s.criteria.taught.slice(0, 3).join(", ")}) includes none of the arguments that come up more when you win.`;
           } else if (conc && conc.agree.n >= MIN_SIDE && rate(conc.agree) >= 0.5 && conc.goAheadOfAgreed.n >= MIN_SIDE && rate(conc.goAheadOfAgreed) >= 0.3) {
             triage = "proof_missing";
@@ -1661,7 +1692,7 @@ export async function computeAnalysisMap(
           record_wrong: ["The facts the AI states here are out of date. Correct them in the sources the AI draws on.", "Fix the record"],
           proof_missing: [
             s.criteria?.winnerUntaught
-              ? `When the AI teaches buyers what to look for, ${s.criteria.winnerUntaught} - an argument that comes up more when you win - is missing. Get it into the guides and explainers the AI draws on.`
+              ? `When the AI teaches buyers what to look for, ${s.criteria.winnerUntaught} - an argument that comes up more when you win${critSeldom(s.criteria.winnerUntaught)} - is missing. Get it into the guides and explainers the AI draws on.`
               : s.conceded
                 ? "The AI tells buyers to go ahead without answering the worry. Publish the evidence that answers it where the AI looks for it."
                 : "The answers here make the rival's case and not yours. Publish the evidence for your side where the AI looks for it.",
@@ -2404,7 +2435,7 @@ function tensionsOf(
 // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars).
 // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell.
 // am22 (2026-11-12): the reasons harmonization - each rival's `here` carries `sendsThemes` (the run's dt4 themes, scoped to the contest and to answers sending the buyer to that rival); the theme pass moves to run_themes.ts (same inputs, same dt4 keys); reads bs17 (the away-condition sentence names its theme). Row names come from question_names.ts (the plain-wording pass: What to buy, What's popular, Spotting the problem, What to look for, Habit, Your customers looking around, Your customers making your case) and the band descriptions are rewritten.
-export const ANALYSIS_MAP_VERSION = "am83"; // am83 (2026-11-17, fact layer step 6): the worry tensions carry the Overview findings' facts on the customers' worry card's own scope (bs29), and names resolve the same way whatever order they are met in (rs4). // am82 (2026-11-17, fact layer step 5, part 2): a claim or triage reason that set a rival's share against "your 0%" says "and you none" (the Brief voices it "and <brand> none") - "<rival> takes every pick against your 0%" read oddly; no number, verdict or fact changes. // am81 (2026-11-17, fact layer step 5, part 1): every Map cell is a scope on the fact layer - the scope its card counts in - and its line, verdict, claim, figures, badges, lifts, brands, exception, casting, picks board and examples are statements over the run's facts (Position.facts / MapCell.facts / CastingLine.facts: where each number sits, with its fact id; the verdict reads classify on the two side facts). The Map's own condition grouping is retired (ruling 14): a cell's conditions, fixed situations, both-sides rows and median test are its card's own rows. Rulings that land: 7 (the all-buyers What to buy cell is discovery + use case), 2, 3 (Value claims and figures: shares of every price answer), 4, 5, 8, 9, 10 (the away-condition finding opens on the What to buy card), 12, 13, 14, 15. // am80 (2026-11-17, fact layer step 4, last slice): Spotting the problem, Learning the category, What to look for, the business case, expansion, What to use alongside you, Answering a critic and the settled All questions card are built from the run's facts and selections, and so is every By rival page (every step, bar, body, table, by-buyer row, condition row and argument) - every number carries its fact id, every list its selection id; the old card builders are deleted (a card the fact layer refuses is left without a panel). Rulings that land here: 5, 6, 7 (By rival What to buy conditions, arguments and products on the buyer cards' scope), 8, 14, 15 (one product grouping - the alongside pairings named first too) and the ratified competitor shape on Spotting the problem (by recommendations, floor 5) and Learning the category (by answers naming it, floor 3). // am79 (2026-11-17, fact layer step 4, third slice): the Value cards (each buyer and all buyers), both worries cards (each worry and all of them) and the looking-around card, their step explanations and the rival cards inside them, are built from the run's facts and selections - every number carries its fact id, every list its selection id; rulings 3 (each price answer in one "where it points the buyer instead" bucket), 8 (a brand outside of analysis is never listed or counted as where to go), 9, 14 (the looking-around condition rows on the run's one grouping) and 15 (every product list - your own cheaper options included - on the run's one product grouping, with full and short names; the product grouping keeps the model letter "a"). The competitor lists keep their own rule (the brands named as where to go / instead, 3 answers at least, top five). // am78 (2026-11-17, fact layer step 4, second slice): the head-to-head cards (a named rival, a class, all your named rivals - the lost-with-an-exception step included), What's popular, Premium vs basic and Habit, and the rival cards inside them, are built from the run's facts and selections - every number carries its fact id, every list its selection id; rulings 6, 8, 12 (a pick outside the category its own share), 13 (Premium vs basic: no stance its own share), 14 (one condition grouping - the Premium vs basic rows on the run's condition keys) and 15 (one product grouping; a product named but never picked is a product of its own on the lists of products named), and the ratified competitor shape ranked by recommendations on What's popular and Premium vs basic (head-to-head rivals tagged, an Other row with no bar, the average competitor every listed rival pooled). // am77 (2026-11-17, fact layer step 4, first slice): the What to buy cards (every buyer and all buyers) and the Rivals' customers switching cards are built from the run's facts and selections - every number carries its fact id, every list its selection id; rulings 7, 8, 12, 14, 15 and the ratified competitor group (with its Other row) land on them. // am76 (2026-11-17): the What to look for card carries its list of topics as data (checklist, never drawn) for the Brief to read. // am75 (2026-11-17, Tyler picked option A): each By rival page has a "What to buy - picked, of all answers" row (the rival beside you; the commit rate in its explanation). // am74 (2026-11-17): card lines and sentence spans carry optional stable keys (never drawn) so each number has an id by location. // am73 (2026-11-17): each By rival page has a "What to buy - named" row (the rival's named rate beside yours, with both recommended rates in its explanation) and its headline opens on that rate. // am72 (2026-11-17): the What to buy and switching cards open their lines with "The AI commits to one <noun>: In N% of answers" - the share of the cell's answers that name one in-category pick. // am71 (2026-11-17): a two-sided "What the answer weighs" row carries the other side's share of the same topic (drawn small beside it); a Value claim states where the AI points the buyer instead with the card's own figures (shares of all its answers), not shares of the doubts. // am70 (2026-11-17): the What to buy and switching cards state the average competitor's share of the picks beside yours, and a "Picked, of all answers" line (you and the average competitor). // am69 (2026-11-16): a Value cell's numbers state the "it depends" share (the Brief quotes it). // am68 (2026-11-16, Tyler): the What-to-look-for move is offered only on a cell that names a winning argument the AI seldom teaches there, and names it; a cell with none measured is watched, triage "Keep it" with its own lever (nothing measured to push). // am67 (2026-11-16): a brand the tracker asks about as a class ("a <brand> card") is never among a funnel card's competitors or in its average competitor. // am66 (2026-11-16): a buyer's What to look for cell reads the winning argument from that buyer's own what-to-buy answers; with too few picks it names none (it never borrows the all-buyers argument). // am65 (2026-11-16): Map claims and figures use the cards' words (the worry is fair, steer clear, what the AI tells buyers to look for). // am64 (2026-11-16): every Map cell's line follows one format - your number first, then the one thing it is set against, joined by " - ". // am62 (2026-11-16): each tension carries its key and a move written for the finding (finding_moves.ts; the cell's lever only as a fallback, repeats flagged), and every finding bar says whose number it is. // am61 (2026-11-16): the settled customers' All questions cell opens a small card - what the answer does for the relationship, and an index to the four questions under it (each opens its card). // am60 (2026-11-16): the Habit cell opens its own panel - stick with you or try something else, how often it suggests another brand (the brands suggested, who first, your own it suggests), stick with you if / try something else if, what each side weighs. // am59 (2026-11-16): the Premium vs basic cell opens its own panel - which end the AI sides with, the open-choice funnel, choose premium / choose basic conditions, who it names at each end, what each side weighs. // am58 (2026-11-16): the What to look for step carries which buyers are taught each winning topic off the checklist, which AI companies teach it (when they differ), how long the list is and which brands it names. // am57 (2026-11-16): the critic card's two steps explain themselves (strength: which AI companies, which rivals come up; premise: how strong the answer is when it grants the criticism, which AI companies side with the critic). // am56 (2026-11-16): the alongside card's step carries whose products the AI names, how many, which first and which AI companies name your own. // am55 (2026-11-16): the Map cells "Ecosystem" and "Advocacy" carry their cards' names ("What to use alongside you", "Answering a critic"). // am54 (2026-11-16): name variants of one product are one row in the step explanations' product lists (expansion, business case, learning, looking around). // am53 (2026-11-16): the business case card's step carries which AI companies give a confident case most, which of your products it is built on and which rivals come up (the "also points to" line is gone). // am52 (2026-11-16): the expansion card's step carries which of your products the AI backs, which AI companies back it most and where it points customers instead. // am51 (2026-11-16): the looking-around card's two steps explain themselves; "shows another" carries how long the list is, the rivals shown (moved from the block below), who is shown first, which products and your own. // am50 (2026-11-16): the worries cards' two steps explain themselves ("Agrees the worry is fair": the other judgements, the advice after agreeing, which worries, which AI companies). // am49 (2026-11-16): the exception step is tagged "The exception". // am48 (2026-11-16): a head-to-head lost with an exception carries an "exception" step (of the answers that pick the rival, how many still say when to choose you) whose explanation names who is still sent to you. // am47 (2026-11-16): the checklist table's last column is one bar per topic with a line where the checklist starts. // am46 (2026-11-16): the checklist table's last column is two short cells (share taught, and the word). // am45 (2026-11-16): What to look for - a topic off the checklist reads "seldom taught" with its share (or "never taught"), and the checklist and taught terms carry help text. // am44 (2026-11-16): the product test counts a rival's name that is only where a verdict sends the buyer at a higher bar (25% of the answers naming it), so a rival's points programme is no longer listed as one of its products. // am43 (2026-11-16): a name is listed as one of a brand's products only when some answer in the run picks it or it is a confirmed Value line (a programme or feature is named, never picked). // am42 (2026-11-16): a rival's card inside Value, the worries and looking around - no "you named" row (the question names you), Value sets the rival against you as the better option, and its weighs block is set against the cell's other answers. // am41 (2026-11-16): What's popular - the "names one pick" step explains itself (what the answer does instead, who gets the pick, which AI companies name one). // am40 (2026-11-16): a both-sides condition row's "also said for" figure is the other side's own share (it was the share saying it for either side). // am39 (2026-11-16): Value - "mostly names no cheaper option" needs 60%, about half reads as half and says which way the rest goes; the own-options list says it counts answers that also name a rival. // am38 (2026-11-16): Value's two steps explain themselves (details.worth / details.instead; the rivals named instead, the rival products and your own cheaper options move into the "where it points" explanation), Value names the product asked about (and an all-buyers cell asking about several carries a by-product table), and "What the answer weighs" is a sized block on every panel that showed it as a line; every non-panel Position field byte-identical. // am37 (2026-11-16): the six-reader panel audit fixes - "lose" / "gap" wording only when behind, tags agree with their numbers (3-point closeness, Level, Always, Split), no usual-comparison default detail on average-competitor panels, one own-cheaper share per Value panel, product names merged, possessives and articles, condition rows normalised, critic / criteria / worry headings agree with their bars; every non-panel Position field byte-identical. // am36 (2026-11-16): the verdict panels (Value, both worries, looking around, expansion, business case, critic, alongside, what to look for) tag each step with a one-line takeaway read off its own numbers (panel_tags.ts thresholds), the same in both views; their explanation is a heading and one sentence with no number the top bars draw (the usual said in words); the looking-around lead quotes its conditions without shares; the head-to-head default explanation carries no bar number. Every non-panel Position field byte-identical. // am35 (2026-11-16): a panel with no usual sets you against the average competitor with the switch off (PositionPanel.avgComp, step.usual = the listed competitors added up, "... the average competitor" tags, details against it); every step explanation is a heading, one sentence with no number the step bars draw, then only new facts (who takes the pick after recommending you as rows; converts keeps only "lose to another" and "no single pick"). Every non-panel Position field byte-identical. // am34 (2026-11-16): the question-type panels' steps explain themselves - PositionPanel.details / detailsComp (named, recommended, ends as the pick; head-to-heads: picks one of the two, who it picks), served through /cell_panel only; every non-panel Position field byte-identical. // am33 (2026-11-15): recompute only - buyer-question labels re-keyed (the asker is "they"). // am32 (2026-11-15): recompute only - buyer-question labels are rewritten under the no-you check (question_labels.ts); no compute change. // am31 (2026-11-15): the per-question-type panels - Position.panel on every cell of the eleven panel kinds (PANEL_BUILD_SPEC; panel_build.ts): claims, steps with "your usual" / rank / duel tags, conditions as shares of all the cell's answers, competitors and panel 11 rivals, every number with up to 3 example answers; the served map carries a panelStub per cell and /cell_panel serves one cell's panel from the same cached result. Every other Position field byte-identical; theme and condition-grouping inputs unchanged. // am30 (2026-11-13): the argument_flip insight (bs24) places on the all-buyers cell of the question type where the argument goes against you. // am29 (2026-11-13): the away-condition finding opens on the contest whose own away reasons state its quoted condition with the largest share (was: a rival named in the text, a fixed-tagged cell, else the general open-choice row). // am28 (2026-11-13): a grouped reason is tagged a fixed situation by its own NAME only, also when it has sub-rows (reason_themes) - a fixed member wording never tags the whole group. // am27 (2026-11-12): lost, with an exception - a head-to-head lost on balance with at least 20 lost answers, half of them still stating a case for you, carries Position.exception (the up-to-3 client-side conditions in the lost answers, themed when themes exist, with examples that picked the rival) and MapCell.exception; the assigned_exception insight (bs19) places on the lost matchup where its condition comes up most. // am26 (2026-11-12): both-ways rows whose wordings fall in the same reason theme on both sides are one row. // am25 (2026-11-12): the vendor_outlier insight (bs18) places on the all-buyers cell of the question type its title names. // am24 (2026-11-12): both-ways rows only on pick contests, each side at least 5% and half the other, top 3, never a reason paired with its opposite. // am23 (2026-11-12): an answer shown as an example toward you is never shown away; a rival's panel examples name only its own products in `to`. // am21 (2026-11-12): reason-row examples prefer answers that send the buyer one way only, then the wording closest to the row name, and each carries `to` (the product it sends the buyer to). // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
+export const ANALYSIS_MAP_VERSION = "am84"; // am84 (2026-11-18, the floor rulings): one "argument that comes up more when you win" rule (10 answers a side, no incidence gate; a row raised in under 5% of the two sides' answers stays, marked seldom, and never leads a sentence when a common row exists - the sentence says so when it must); the one-assistant caveat also needs the Overview finding's range test; the advice on a fixed situation needs 15 answers on the row (the tag stays at 5); the settled redirect taker needs 3 answers and 20%; AI-company sections list a company at 10 answers. // am83 (2026-11-17, fact layer step 6): the worry tensions carry the Overview findings' facts on the customers' worry card's own scope (bs29), and names resolve the same way whatever order they are met in (rs4). // am82 (2026-11-17, fact layer step 5, part 2): a claim or triage reason that set a rival's share against "your 0%" says "and you none" (the Brief voices it "and <brand> none") - "<rival> takes every pick against your 0%" read oddly; no number, verdict or fact changes. // am81 (2026-11-17, fact layer step 5, part 1): every Map cell is a scope on the fact layer - the scope its card counts in - and its line, verdict, claim, figures, badges, lifts, brands, exception, casting, picks board and examples are statements over the run's facts (Position.facts / MapCell.facts / CastingLine.facts: where each number sits, with its fact id; the verdict reads classify on the two side facts). The Map's own condition grouping is retired (ruling 14): a cell's conditions, fixed situations, both-sides rows and median test are its card's own rows. Rulings that land: 7 (the all-buyers What to buy cell is discovery + use case), 2, 3 (Value claims and figures: shares of every price answer), 4, 5, 8, 9, 10 (the away-condition finding opens on the What to buy card), 12, 13, 14, 15. // am80 (2026-11-17, fact layer step 4, last slice): Spotting the problem, Learning the category, What to look for, the business case, expansion, What to use alongside you, Answering a critic and the settled All questions card are built from the run's facts and selections, and so is every By rival page (every step, bar, body, table, by-buyer row, condition row and argument) - every number carries its fact id, every list its selection id; the old card builders are deleted (a card the fact layer refuses is left without a panel). Rulings that land here: 5, 6, 7 (By rival What to buy conditions, arguments and products on the buyer cards' scope), 8, 14, 15 (one product grouping - the alongside pairings named first too) and the ratified competitor shape on Spotting the problem (by recommendations, floor 5) and Learning the category (by answers naming it, floor 3). // am79 (2026-11-17, fact layer step 4, third slice): the Value cards (each buyer and all buyers), both worries cards (each worry and all of them) and the looking-around card, their step explanations and the rival cards inside them, are built from the run's facts and selections - every number carries its fact id, every list its selection id; rulings 3 (each price answer in one "where it points the buyer instead" bucket), 8 (a brand outside of analysis is never listed or counted as where to go), 9, 14 (the looking-around condition rows on the run's one grouping) and 15 (every product list - your own cheaper options included - on the run's one product grouping, with full and short names; the product grouping keeps the model letter "a"). The competitor lists keep their own rule (the brands named as where to go / instead, 3 answers at least, top five). // am78 (2026-11-17, fact layer step 4, second slice): the head-to-head cards (a named rival, a class, all your named rivals - the lost-with-an-exception step included), What's popular, Premium vs basic and Habit, and the rival cards inside them, are built from the run's facts and selections - every number carries its fact id, every list its selection id; rulings 6, 8, 12 (a pick outside the category its own share), 13 (Premium vs basic: no stance its own share), 14 (one condition grouping - the Premium vs basic rows on the run's condition keys) and 15 (one product grouping; a product named but never picked is a product of its own on the lists of products named), and the ratified competitor shape ranked by recommendations on What's popular and Premium vs basic (head-to-head rivals tagged, an Other row with no bar, the average competitor every listed rival pooled). // am77 (2026-11-17, fact layer step 4, first slice): the What to buy cards (every buyer and all buyers) and the Rivals' customers switching cards are built from the run's facts and selections - every number carries its fact id, every list its selection id; rulings 7, 8, 12, 14, 15 and the ratified competitor group (with its Other row) land on them. // am76 (2026-11-17): the What to look for card carries its list of topics as data (checklist, never drawn) for the Brief to read. // am75 (2026-11-17, Tyler picked option A): each By rival page has a "What to buy - picked, of all answers" row (the rival beside you; the commit rate in its explanation). // am74 (2026-11-17): card lines and sentence spans carry optional stable keys (never drawn) so each number has an id by location. // am73 (2026-11-17): each By rival page has a "What to buy - named" row (the rival's named rate beside yours, with both recommended rates in its explanation) and its headline opens on that rate. // am72 (2026-11-17): the What to buy and switching cards open their lines with "The AI commits to one <noun>: In N% of answers" - the share of the cell's answers that name one in-category pick. // am71 (2026-11-17): a two-sided "What the answer weighs" row carries the other side's share of the same topic (drawn small beside it); a Value claim states where the AI points the buyer instead with the card's own figures (shares of all its answers), not shares of the doubts. // am70 (2026-11-17): the What to buy and switching cards state the average competitor's share of the picks beside yours, and a "Picked, of all answers" line (you and the average competitor). // am69 (2026-11-16): a Value cell's numbers state the "it depends" share (the Brief quotes it). // am68 (2026-11-16, Tyler): the What-to-look-for move is offered only on a cell that names a winning argument the AI seldom teaches there, and names it; a cell with none measured is watched, triage "Keep it" with its own lever (nothing measured to push). // am67 (2026-11-16): a brand the tracker asks about as a class ("a <brand> card") is never among a funnel card's competitors or in its average competitor. // am66 (2026-11-16): a buyer's What to look for cell reads the winning argument from that buyer's own what-to-buy answers; with too few picks it names none (it never borrows the all-buyers argument). // am65 (2026-11-16): Map claims and figures use the cards' words (the worry is fair, steer clear, what the AI tells buyers to look for). // am64 (2026-11-16): every Map cell's line follows one format - your number first, then the one thing it is set against, joined by " - ". // am62 (2026-11-16): each tension carries its key and a move written for the finding (finding_moves.ts; the cell's lever only as a fallback, repeats flagged), and every finding bar says whose number it is. // am61 (2026-11-16): the settled customers' All questions cell opens a small card - what the answer does for the relationship, and an index to the four questions under it (each opens its card). // am60 (2026-11-16): the Habit cell opens its own panel - stick with you or try something else, how often it suggests another brand (the brands suggested, who first, your own it suggests), stick with you if / try something else if, what each side weighs. // am59 (2026-11-16): the Premium vs basic cell opens its own panel - which end the AI sides with, the open-choice funnel, choose premium / choose basic conditions, who it names at each end, what each side weighs. // am58 (2026-11-16): the What to look for step carries which buyers are taught each winning topic off the checklist, which AI companies teach it (when they differ), how long the list is and which brands it names. // am57 (2026-11-16): the critic card's two steps explain themselves (strength: which AI companies, which rivals come up; premise: how strong the answer is when it grants the criticism, which AI companies side with the critic). // am56 (2026-11-16): the alongside card's step carries whose products the AI names, how many, which first and which AI companies name your own. // am55 (2026-11-16): the Map cells "Ecosystem" and "Advocacy" carry their cards' names ("What to use alongside you", "Answering a critic"). // am54 (2026-11-16): name variants of one product are one row in the step explanations' product lists (expansion, business case, learning, looking around). // am53 (2026-11-16): the business case card's step carries which AI companies give a confident case most, which of your products it is built on and which rivals come up (the "also points to" line is gone). // am52 (2026-11-16): the expansion card's step carries which of your products the AI backs, which AI companies back it most and where it points customers instead. // am51 (2026-11-16): the looking-around card's two steps explain themselves; "shows another" carries how long the list is, the rivals shown (moved from the block below), who is shown first, which products and your own. // am50 (2026-11-16): the worries cards' two steps explain themselves ("Agrees the worry is fair": the other judgements, the advice after agreeing, which worries, which AI companies). // am49 (2026-11-16): the exception step is tagged "The exception". // am48 (2026-11-16): a head-to-head lost with an exception carries an "exception" step (of the answers that pick the rival, how many still say when to choose you) whose explanation names who is still sent to you. // am47 (2026-11-16): the checklist table's last column is one bar per topic with a line where the checklist starts. // am46 (2026-11-16): the checklist table's last column is two short cells (share taught, and the word). // am45 (2026-11-16): What to look for - a topic off the checklist reads "seldom taught" with its share (or "never taught"), and the checklist and taught terms carry help text. // am44 (2026-11-16): the product test counts a rival's name that is only where a verdict sends the buyer at a higher bar (25% of the answers naming it), so a rival's points programme is no longer listed as one of its products. // am43 (2026-11-16): a name is listed as one of a brand's products only when some answer in the run picks it or it is a confirmed Value line (a programme or feature is named, never picked). // am42 (2026-11-16): a rival's card inside Value, the worries and looking around - no "you named" row (the question names you), Value sets the rival against you as the better option, and its weighs block is set against the cell's other answers. // am41 (2026-11-16): What's popular - the "names one pick" step explains itself (what the answer does instead, who gets the pick, which AI companies name one). // am40 (2026-11-16): a both-sides condition row's "also said for" figure is the other side's own share (it was the share saying it for either side). // am39 (2026-11-16): Value - "mostly names no cheaper option" needs 60%, about half reads as half and says which way the rest goes; the own-options list says it counts answers that also name a rival. // am38 (2026-11-16): Value's two steps explain themselves (details.worth / details.instead; the rivals named instead, the rival products and your own cheaper options move into the "where it points" explanation), Value names the product asked about (and an all-buyers cell asking about several carries a by-product table), and "What the answer weighs" is a sized block on every panel that showed it as a line; every non-panel Position field byte-identical. // am37 (2026-11-16): the six-reader panel audit fixes - "lose" / "gap" wording only when behind, tags agree with their numbers (3-point closeness, Level, Always, Split), no usual-comparison default detail on average-competitor panels, one own-cheaper share per Value panel, product names merged, possessives and articles, condition rows normalised, critic / criteria / worry headings agree with their bars; every non-panel Position field byte-identical. // am36 (2026-11-16): the verdict panels (Value, both worries, looking around, expansion, business case, critic, alongside, what to look for) tag each step with a one-line takeaway read off its own numbers (panel_tags.ts thresholds), the same in both views; their explanation is a heading and one sentence with no number the top bars draw (the usual said in words); the looking-around lead quotes its conditions without shares; the head-to-head default explanation carries no bar number. Every non-panel Position field byte-identical. // am35 (2026-11-16): a panel with no usual sets you against the average competitor with the switch off (PositionPanel.avgComp, step.usual = the listed competitors added up, "... the average competitor" tags, details against it); every step explanation is a heading, one sentence with no number the step bars draw, then only new facts (who takes the pick after recommending you as rows; converts keeps only "lose to another" and "no single pick"). Every non-panel Position field byte-identical. // am34 (2026-11-16): the question-type panels' steps explain themselves - PositionPanel.details / detailsComp (named, recommended, ends as the pick; head-to-heads: picks one of the two, who it picks), served through /cell_panel only; every non-panel Position field byte-identical. // am33 (2026-11-15): recompute only - buyer-question labels re-keyed (the asker is "they"). // am32 (2026-11-15): recompute only - buyer-question labels are rewritten under the no-you check (question_labels.ts); no compute change. // am31 (2026-11-15): the per-question-type panels - Position.panel on every cell of the eleven panel kinds (PANEL_BUILD_SPEC; panel_build.ts): claims, steps with "your usual" / rank / duel tags, conditions as shares of all the cell's answers, competitors and panel 11 rivals, every number with up to 3 example answers; the served map carries a panelStub per cell and /cell_panel serves one cell's panel from the same cached result. Every other Position field byte-identical; theme and condition-grouping inputs unchanged. // am30 (2026-11-13): the argument_flip insight (bs24) places on the all-buyers cell of the question type where the argument goes against you. // am29 (2026-11-13): the away-condition finding opens on the contest whose own away reasons state its quoted condition with the largest share (was: a rival named in the text, a fixed-tagged cell, else the general open-choice row). // am28 (2026-11-13): a grouped reason is tagged a fixed situation by its own NAME only, also when it has sub-rows (reason_themes) - a fixed member wording never tags the whole group. // am27 (2026-11-12): lost, with an exception - a head-to-head lost on balance with at least 20 lost answers, half of them still stating a case for you, carries Position.exception (the up-to-3 client-side conditions in the lost answers, themed when themes exist, with examples that picked the rival) and MapCell.exception; the assigned_exception insight (bs19) places on the lost matchup where its condition comes up most. // am26 (2026-11-12): both-ways rows whose wordings fall in the same reason theme on both sides are one row. // am25 (2026-11-12): the vendor_outlier insight (bs18) places on the all-buyers cell of the question type its title names. // am24 (2026-11-12): both-ways rows only on pick contests, each side at least 5% and half the other, top 3, never a reason paired with its opposite. // am23 (2026-11-12): an answer shown as an example toward you is never shown away; a rival's panel examples name only its own products in `to`. // am21 (2026-11-12): reason-row examples prefer answers that send the buyer one way only, then the wording closest to the row name, and each carries `to` (the product it sends the buyer to). // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
 // The fold (2026-11-09, Tyler): a view's cache key carries the versions of
 // the views whose content it embeds, so the lockstep bump convention is
 // mechanical - the map embeds the summary's insights, casting and verdict.

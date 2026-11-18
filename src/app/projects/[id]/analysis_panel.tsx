@@ -35,6 +35,7 @@ import { T } from "./type_scale";
 import { MatchupDropNote, MatchupGap } from "./matchup_action";
 import { LazyCellPanel, LazyRival, LazyRivalAcross, MatchupConditions, PositionPanelView, hasRivalAcross, hasRivalPanel } from "./panels_v2";
 import { CompProvider } from "./panel_parts";
+import { SeldomTag } from "./seldom_tag";
 import type { PanelReveal } from "@/lib/engine/panel_view";
 
 /**
@@ -580,7 +581,10 @@ function LiftRows({ lifts, sides }: { lifts: (LiftItem | DossierArg)[]; sides: [
           head={() => (
             <span className="block text-[14px]">
               <span className="flex justify-between gap-3">
-                <b className="font-semibold text-ink">{l.label}</b>
+                <b className="font-semibold text-ink">
+                  {l.label}
+                  {"seldom" in l && l.seldom && <SeldomTag />}
+                </b>
                 <span className="tabular-nums text-ink-2">
                   {l.value > 0 ? "+" : ""}
                   {Math.round(l.value)} points

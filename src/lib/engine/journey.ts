@@ -2,7 +2,7 @@ import { STATION_LABEL, stationQuestion, viewsOf, type StationKey } from "./view
 import { cachedView, requestOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { sharedRunFacts, cardCondRows, WTB, type CardCondRow } from "./facts/overview_facts";
 import { computeTypeDetail, ctxOf, type Ctx, type TypeDetailBundle } from "./facts/type_detail";
-import { OVERVIEW_FLOORS as OF } from "./facts/measure_book";
+import { OVERVIEW_FLOORS as OF, seldomOf, leadsFirst } from "./facts/measure_book";
 import { parseFactId, type FactCell } from "./facts/statements";
 import type { QuestionType } from "./facts/answer_facts";
 import type { Scope } from "./facts/fact";
@@ -32,7 +32,7 @@ export type { RateCell, StationKey };
  */
 
 /** Bumped whenever the payload shape or a number's meaning changes. */
-export const JOURNEY_VERSION = "j9"; // j9 (2026-11-18, fact layer step 8): every number a fact; reasons per question type on the cards' condition rows; ruling 7 (which should I get = discovery + use case), 2, 3, 8, 12, 13 apply; the view is cached. // j8 (2026-11-17, fact layer step 6): Value's "who is recommended instead" is a fact per rival. // j7 (2026-11-16): the two settled rows carry the Map names. // j6 (2026-11-10): the tightened wall test
+export const JOURNEY_VERSION = "j10"; // j10 (2026-11-18, the floor rulings): station arguments on the one lift rule (10 answers a side, no incidence gate, each row marked seldom, each side led by a row not seldom raised). // j9 (2026-11-18, fact layer step 8): every number a fact; reasons per question type on the cards' condition rows; ruling 7 (which should I get = discovery + use case), 2, 3, 8, 12, 13 apply; the view is cached. // j8 (2026-11-17, fact layer step 6): Value's "who is recommended instead" is a fact per rival. // j7 (2026-11-16): the two settled rows carry the Map names. // j6 (2026-11-10): the tightened wall test
 
 export interface JourneyMetric {
   key: string;
@@ -115,6 +115,8 @@ export interface JourneyArgument {
   forYou: boolean;
   inYourPicks: RateCell;
   inRivalPicks: RateCell;
+  /** Raised in under FLOORS.seldomShare of the two sides' answers together (measure_book seldomOf). */
+  seldom: boolean;
 }
 
 export type StationPart = "picks" | "arguments" | "reasons";
@@ -211,8 +213,9 @@ function roomsOf(data: ViewData): string[] {
 /**
  * Top 2 for / top 2 against: an argument's share among a scope's answers on the favorable side of its verdict against
  * the other side (each a fact: measure "argues" on the scope narrowed to the side's slice). Both sides must hold
- * liftMinAnswers answers carrying arguments, and the argument must be argued in liftMinIncidence of the scope's answers
- * carrying arguments - the Overview's floors (OVERVIEW_FLOORS).
+ * liftMinAnswers answers carrying arguments - the one lift rule (FLOORS.liftMinSide, no incidence gate); a row raised in
+ * under FLOORS.seldomShare of the two sides' answers is kept and marked seldom. Each side's top 2: common rows first in
+ * strength order, seldom rows only in a free slot (leadsFirst).
  */
 function argumentsOf(c: Ctx, types: QuestionType[], fav: string, other: string, pinned: boolean): JourneyArgument[] {
   const sc: Scope = { types, ...(pinned && c.room !== undefined ? { situation: c.room } : {}), when: "args" };
@@ -224,16 +227,17 @@ function argumentsOf(c: Ctx, types: QuestionType[], fav: string, other: string, 
   const lift = [...codes]
     .sort()
     .flatMap((code) => {
-      const inc = c.F("argues", `ai/arg:${code}`, sc);
-      if (inc.n === 0 || inc.k / inc.n < OF.liftMinIncidence) return [];
       const w = c.F("argues", `ai/arg:${code}`, side(fav));
       const o = c.F("argues", `ai/arg:${code}`, side(other));
-      return [{ code, w, o, lift: rate(w) - rate(o) }];
+      if (w.k + o.k === 0) return [];
+      return [{ code, w, o, lift: rate(w) - rate(o), seldom: seldomOf(w, o) }];
     })
     .sort((a, b) => b.lift - a.lift || a.code.localeCompare(b.code));
-  const forYou = lift.filter((r) => r.lift > 0).slice(0, 2);
-  const against = lift.filter((r) => r.lift < 0).slice(-2).reverse();
-  return [...forYou, ...against].map((r) => ({ code: r.code, forYou: r.lift > 0, inYourPicks: r.w, inRivalPicks: r.o }));
+  // A capped list: common rows first, seldom rows only in free slots (leadsFirst).
+  const top2 = <T extends { seldom: boolean }>(xs: T[]): T[] => leadsFirst(xs).slice(0, 2);
+  const forYou = top2(lift.filter((r) => r.lift > 0));
+  const against = top2(lift.filter((r) => r.lift < 0).reverse());
+  return [...forYou, ...against].map((r) => ({ code: r.code, forYou: r.lift > 0, inYourPicks: r.w, inRivalPicks: r.o, seldom: r.seldom }));
 }
 
 /** One side of a question type's reasons: the card's condition rows, shares of all the type's answers. */

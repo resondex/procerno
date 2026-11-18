@@ -10,7 +10,7 @@ import type { MoveNames } from "./finding_moves";
 import { buyerPhrase, possName } from "./brief_words";
 import { condLabel } from "./panel_text";
 import type { Scope } from "./facts/fact";
-import { OVERVIEW_FLOORS as OF } from "./facts/measure_book";
+import { OVERVIEW_FLOORS as OF, leadsFirst, liftLead } from "./facts/measure_book";
 import { closeGates, extremeWords, finish, gApart, gAtLeast, gBelow, gGap, gK, gLowAbove, gN, isFactCell, openGates, pd, pfine, pw, type FactCell, type Gate, type StmtNums } from "./facts/statements";
 import { inputsFromFacts, refsFor, sharedRunFacts, sitSlice, summaryFromFacts, worrySlice, type CardCondRow, type RunFacts } from "./facts/overview_facts";
 
@@ -623,17 +623,21 @@ function h2hBars(ok: Summary["headToHead"], hardest: string, keep?: string): Ins
 }
 
 function argument(s: Summary): Insight | null {
-  const best = s.reasonLift[0];
-  const worst = s.reasonLift.length > 1 ? s.reasonLift[s.reasonLift.length - 1] : undefined;
-  if (!best || !worst) return null;
+  // Ruling 1 (2026-11-18): each end is the strongest argument that is not seldom raised; a seldom one leads only when
+  // every argument on its side is seldom raised, and the sentence says so.
+  const rl = s.reasonLift;
+  const best = liftLead(rl.filter((l) => l.lift > 0))?.row ?? rl[0];
+  const worst = liftLead([...rl].reverse().filter((l) => l.lift < 0))?.row ?? (rl.length > 1 ? rl[rl.length - 1] : undefined);
+  if (!best || !worst || worst === best) return null;
+  const st = (x: { seldom: boolean }) => (x.seldom ? ", though it is seldom raised" : "");
   // bf34: the Brief quotes the card - the strongest winning and losing arguments the card shows, its own figures.
   const ca = STYLE?.cardArg;
-  const cb = ca ? s.reasonLift.filter((l) => l.lift > 0).map((l) => ({ l, f: ca(l.code, "you") })).find((x) => x.f) : undefined;
-  const cw = ca ? [...s.reasonLift].reverse().filter((l) => l.lift < 0).map((l) => ({ l, f: ca(l.code, "rival") })).find((x) => x.f) : undefined;
+  const cb = ca ? leadsFirst(rl.filter((l) => l.lift > 0)).map((l) => ({ l, f: ca(l.code, "you") })).find((x) => x.f) : undefined;
+  const cw = ca ? leadsFirst([...rl].reverse().filter((l) => l.lift < 0)).map((l) => ({ l, f: ca(l.code, "rival") })).find((x) => x.f) : undefined;
   const cardBody = !ca
     ? null
     : cb
-      ? `${cb.f!.name} comes up in ${cb.f!.here} of the answers that pick ${STYLE!.name} and ${cb.f!.there} of those that pick a rival.${cw ? ` Answers that pick a rival bring up ${cw.f!.name.toLowerCase()} in ${cw.f!.here}, against ${cw.f!.there} when ${STYLE!.name} is picked.` : ""}`
+      ? `${cb.f!.name} comes up in ${cb.f!.here} of the answers that pick ${STYLE!.name} and ${cb.f!.there} of those that pick a rival${st(cb.l)}.${cw ? ` Answers that pick a rival bring up ${cw.f!.name.toLowerCase()} in ${cw.f!.here}, against ${cw.f!.there} when ${STYLE!.name} is picked${st(cw.l)}.` : ""}`
       : "";
   return {
     key: "argument",
@@ -643,8 +647,8 @@ function argument(s: Summary): Insight | null {
     body: cardBody !== null
       ? cardBody
       : STYLE
-      ? `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up in ${pz(best.wins)} of the answers that pick ${STYLE.name} and ${pz(best.others)} of those that pick a rival. Answers that pick a rival bring up ${worst.code} in ${pz(worst.others)}, against ${pz(worst.wins)} when ${STYLE.name} is picked.`
-      : `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up ${pts(best.wins, best.others)} ${best.lift >= 0 ? "more" : "less"} often in answers that pick ${yo()} than in answers that pick a rival. Answers that pick a rival bring up ${worst.code} ${worst.lift <= 0 ? "more" : "less"} (${pts(worst.wins, worst.others)}).`,
+      ? `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up in ${pz(best.wins)} of the answers that pick ${STYLE.name} and ${pz(best.others)} of those that pick a rival${st(best)}. Answers that pick a rival bring up ${worst.code} in ${pz(worst.others)}, against ${pz(worst.wins)} when ${STYLE.name} is picked${st(worst)}.`
+      : `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up ${pts(best.wins, best.others)} ${best.lift >= 0 ? "more" : "less"} often in answers that pick ${yo()} than in answers that pick a rival${st(best)}. Answers that pick a rival bring up ${worst.code} ${worst.lift <= 0 ? "more" : "less"} (${pts(worst.wins, worst.others)})${st(worst)}.`,
     foot: `${best.code}: ${pct(best.wins)} of ${best.wins.n} wins vs ${pct(best.others)} of ${best.others.n} rival picks. ${worst.code}: ${pct(worst.wins)} vs ${pct(worst.others)}.`,
     look: { pill: "why", label: "Why" },
     effect: best.lift - worst.lift,
@@ -924,12 +928,16 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
   if (inp.taught.length === 0 || s.reasonLift.length === 0) return null;
   const top5 = inp.taught.slice(0, 5);
   const taughtSet = new Set(top5.map((t) => t.code));
-  const best = s.reasonLift[0];
+  // Ruling 1: the winning argument is the strongest that is not seldom raised (liftLead), the losing one likewise.
+  const best = liftLead(s.reasonLift.filter((l) => l.lift > 0))?.row ?? s.reasonLift[0];
   const untaught = best.lift > 0 && !taughtSet.has(best.code) && apart(best.wins, best.others) ? best : null;
-  const losing = top5
-    .map((t) => s.reasonLift.find((l) => l.code === t.code))
-    .filter((l): l is NonNullable<typeof l> => !!l && l.lift < 0 && apart(l.others, l.wins))
-    .sort((a, b) => a.lift - b.lift)[0] ?? null;
+  const losing = leadsFirst(
+    top5
+      .map((t) => s.reasonLift.find((l) => l.code === t.code))
+      .filter((l): l is NonNullable<typeof l> => !!l && l.lift < 0 && apart(l.others, l.wins))
+      .sort((a, b) => a.lift - b.lift)
+  )[0] ?? null;
+  const st = (x: { seldom: boolean }) => (x.seldom ? ", though it is seldom raised" : "");
   if (!untaught && !losing) return null;
   const taughtOf = (code: string) => inp.taught.find((t) => t.code === code)?.rate;
   const parts: string[] = [];
@@ -940,14 +948,14 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
   const cl = losing && ca ? ca(losing.code, "rival") : null;
   const cited: string[] = [];
   if (ca) {
-    if (cu) cited.push(`${cu.name.toLowerCase()} comes up in ${cu.here} of the answers that pick ${STYLE!.name} and ${cu.there} of those that pick a rival, but is not among the five things the AI most often tells buyers to look for`);
-    if (cl) cited.push(`${cu ? "it" : "the AI"} tells buyers to look for ${cl.name.toLowerCase()}, which comes up in ${cl.here} of the answers that pick a rival and ${cl.there} of those that pick ${STYLE!.name}`);
+    if (cu) cited.push(`${cu.name.toLowerCase()} comes up in ${cu.here} of the answers that pick ${STYLE!.name} and ${cu.there} of those that pick a rival${st(untaught!)}, but is not among the five things the AI most often tells buyers to look for`);
+    if (cl) cited.push(`${cu ? "it" : "the AI"} tells buyers to look for ${cl.name.toLowerCase()}, which comes up in ${cl.here} of the answers that pick a rival and ${cl.there} of those that pick ${STYLE!.name}${st(losing!)}`);
   }
   if (untaught) {
     parts.push(
       STYLE
-        ? `${untaught.code} comes up in ${pz(untaught.wins)} of the answers that pick ${STYLE.name} and ${pz(untaught.others)} of those that pick a rival, but is not among the five things the AI most often tells buyers to look for`
-        : `${untaught.code} comes up ${pts(untaught.wins, untaught.others)} more often when you win but is not among the five things the AI most often tells buyers to look for`
+        ? `${untaught.code} comes up in ${pz(untaught.wins)} of the answers that pick ${STYLE.name} and ${pz(untaught.others)} of those that pick a rival${st(untaught)}, but is not among the five things the AI most often tells buyers to look for`
+        : `${untaught.code} comes up ${pts(untaught.wins, untaught.others)} more often when you win${st(untaught)} but is not among the five things the AI most often tells buyers to look for`
     );
     const tr = taughtOf(untaught.code);
     foot.push(`${untaught.code}: ${pct(untaught.wins)} of wins vs ${pct(untaught.others)} of rival picks; taught in ${tr ? counts(tr) : "no"} criteria answers.`);
@@ -955,8 +963,8 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
   if (losing) {
     parts.push(
       STYLE
-        ? `${untaught ? "it" : "the AI"} tells buyers to look for ${losing.code}, which comes up in ${pz(losing.others)} of the answers that pick a rival and ${pz(losing.wins)} of those that pick ${STYLE.name}`
-        : `${untaught ? "it" : "the AI"} tells buyers to look for ${losing.code}, which shows up more when a rival is picked (${pd("diff_signed", [losing.wins, losing.others])})`
+        ? `${untaught ? "it" : "the AI"} tells buyers to look for ${losing.code}, which comes up in ${pz(losing.others)} of the answers that pick a rival and ${pz(losing.wins)} of those that pick ${STYLE.name}${st(losing)}`
+        : `${untaught ? "it" : "the AI"} tells buyers to look for ${losing.code}, which shows up more when a rival is picked (${pd("diff_signed", [losing.wins, losing.others])})${st(losing)}`
     );
     foot.push(`${losing.code}: ${pct(losing.wins)} of wins vs ${pct(losing.others)} of rival picks; taught in ${counts(taughtOf(losing.code)!)}.`);
   }
@@ -1366,6 +1374,15 @@ const ENGINE_CONC_SHARE = OF.engineConcShare;
 const ENGINE_CONC_MIN_ENGINES = OF.engineConcMinEngines;
 
 /**
+ * The one "one assistant / one AI company supplies the picks" test (the Overview finding's, and the Map's watch caveat
+ * on top of its own floors): the unit supplies at least OF.engineConcShare of the picks AND the 95% range of that share
+ * clears the unit's own share of the answers (`base`, 0-1).
+ */
+export function clearsConcentration(picks: RateCell, base: number): boolean {
+  return rate(picks) >= ENGINE_CONC_SHARE && picks.low > base;
+}
+
+/**
  * One engine - or one vendor's assistants pooled - supplies >= 40% of a
  * brand's open-choice picks (the target or a tracked rival, >= MIN_BASE
  * picks). The baseline is the unit's own share of the open-choice answers
@@ -1397,7 +1414,7 @@ function enginePickConcentration(s: Summary, inp: InsightInputs): Insight | null
       const picks = inp.F.fact("slice_share", `ai/slice:eng:${u.models.join(",")}`, { ...inp.F.wtb, when: `pick:${b.key === s.target.key ? "you" : b.key}` });
       const baseC = inp.F.fact("slice_share", `ai/slice:eng:${u.models.join(",")}`, inp.F.wtb);
       const base = rate(baseC);
-      if (rate(picks) >= ENGINE_CONC_SHARE && picks.low > base) {
+      if (clearsConcentration(picks, base)) {
         gAtLeast(picks, ENGINE_CONC_SHARE);
         gLowAbove(picks, base);
         cands.push({ key: b.key, name: names.get(b.key)!, isTarget: b.key === s.target.key, unit: u, picks, base, baseC });

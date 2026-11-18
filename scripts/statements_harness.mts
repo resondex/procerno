@@ -11,7 +11,18 @@
  *  2. every statement's decision is recomputed from its facts: each logged gate of every detector (fired or not)
  *     recomputes to the value it was logged with, and every Map cell's verdict recomputes from its two side facts;
  *  3. for every Map cell, each of its numbers whose measure and subject also appear on the card it opens carries the
- *     SAME fact id as the card's (no Map number counts the same thing on another scope than its card).
+ *     SAME fact id as the card's (no Map number counts the same thing on another scope than its card);
+ *  4. the floor rulings (2026-11-18): (a) every argument lift row - the Overview's lift list, every Map cell's lifts
+ *     and its rivals' lifts, every station's arguments, every dossier's arguments - carries a `seldom` boolean, and
+ *     it equals the 5% rule (measure_book seldomOf) recomputed from the row's facts (the Overview's and the stations'
+ *     from their fact ids alone, the Map's from the fact counts its tip prints); (b) no sentence names a seldom
+ *     argument as the lead when an argument on the same side is not seldom (the Overview's argument findings, the
+ *     dossiers' two ends, each station's first argument a side), and a sentence that does name a seldom argument
+ *     says "seldom raised"; (c) every fixed-situation line a cell advises on rests on FLOORS.fixedAdviseMin answers,
+ *     and every AI-company section lists companies at FLOORS.argsMin answers; (d) in every capped list, no seldom row is
+ *     shown while a common row that qualifies for the list was cut - the Map's lift and What to look for lists from
+ *     the engine's record of each list before its cap, and every shown capped list (Map lifts, the What to look for
+ *     tables, station arguments, the Brief cards' lifts) ordered common rows first.
  *
  * Fixture only, keyless:  SQLITE_PATH=data/dashboard_fixture.db VIEW_CACHE=off npx tsx scripts/statements_harness.mts
  */
@@ -31,12 +42,16 @@ const { attachConditions } = await import(process.cwd() + "/src/lib/engine/facts
 const { attachProducts } = await import(process.cwd() + "/src/lib/engine/facts/products.ts");
 const { factBook } = await import(process.cwd() + "/src/lib/engine/facts/fact.ts");
 const { EXTREME_ALL, EXTREME_ZERO, evalRef, evalGate, parseDerived, parseFactId } = await import(process.cwd() + "/src/lib/engine/facts/statements.ts");
+const { FLOORS, seldomOf, liftLead } = await import(process.cwd() + "/src/lib/engine/facts/measure_book.ts");
+const { computeJourneyFromData } = await import(process.cwd() + "/src/lib/engine/journey.ts");
+const { computeDossiers } = await import(process.cwd() + "/src/lib/engine/dossiers.ts");
 
 const PCT = /<?\d+(?:\.\d+)?%|[+-]?\d+ points/g;
 const failures: string[] = [];
 const fail = (s: string) => {
   if (failures.length < 400) failures.push(s);
 };
+const floorTally = { capped: 0, cappedOrder: 0, liftRows: 0, fromIds: 0, fromTips: 0, leads: 0, seldomLeads: 0, walls: 0, vendorSections: 0 };
 const tally = { nums: 0, statements: 0, uncovered: 0, gates: 0, decisions: 0, fired: 0, verdicts: 0, overrides: 0, cardShared: 0, cardDiffer: 0, excChecked: 0, words: 0 };
 
 /** Every fact id string under a card object (PanelNum.fact and friends). */
@@ -255,6 +270,140 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
       }
     }
   }
+  // 4. The floor rulings (2026-11-18).
+  {
+    const kn = (id: string) => {
+      const q = parseFactId(id);
+      const f = book.fact(q.measure, q.subject, q.scope);
+      return { k: f.k, n: f.n };
+    };
+    const rowCheck = (where: string, row: any, w: { k: number; n: number } | null, o: { k: number; n: number } | null) => {
+      floorTally.liftRows++;
+      if (typeof row.seldom !== "boolean") return fail(`${project.brand} ${where}: lift row "${row.code ?? row.label}" carries no seldom flag`);
+      if (!w || !o) return;
+      if (row.seldom !== seldomOf(w, o)) fail(`${project.brand} ${where}: "${row.code ?? row.label}" seldom=${row.seldom}, the 5% rule says ${seldomOf(w, o)} (${w.k}/${w.n}, ${o.k}/${o.n})`);
+    };
+    // (a) The Overview's lift list, from its fact ids alone.
+    for (const l of summary.reasonLift as any[]) {
+      const w = kn(l.wins.id);
+      const o = kn(l.others.id);
+      floorTally.fromIds++;
+      if (w.k !== l.wins.k || w.n !== l.wins.n || o.k !== l.others.k || o.n !== l.others.n) fail(`${project.brand} summary lift "${l.code}": counts do not recompute from their ids`);
+      rowCheck("summary lift", l, w, o);
+    }
+    // The Map's lifts (each cell, each rival in it), from the fact counts the tip prints.
+    const TIP = /^(\d+) of (\d+) · (\d+) of (\d+)$/;
+    for (const [id, p] of Object.entries(map.positions) as [string, any][]) {
+      const rows = [...(p.lifts ?? []), ...(p.brands ?? []).flatMap((b: any) => b.here?.args ?? [])];
+      for (const l of rows) {
+        const m = TIP.exec(l.tip ?? "");
+        if (m) floorTally.fromTips++;
+        rowCheck(`${id} lift`, l, m ? { k: +m[1], n: +m[2] } : null, m ? { k: +m[3], n: +m[4] } : null);
+      }
+      // (b) a Map sentence that names a lift row as THE argument that comes up more when you win (or favors the rival
+      // picks) says "seldom raised" when that row is seldom raised.
+      const NAMED = [
+        /while (.+?), an argument that comes up more when you win/,
+        /including (.+?) - an argument that comes up more when you win/,
+        /^(.+?) comes up more when you win/,
+        /look for, (.+?) - an argument that comes up more when you win/,
+        /: (.+?) helps you/,
+        /, ([^,]+?) favors the rival picks/,
+        /^(.+?)(?: \(seldom raised\))?: how much more often it comes up/,
+      ];
+      const liftByCode = new Map((p.lifts ?? []).map((l: any) => [String(l.label).replace(/ \((taught|seldom).*$/, ""), l]));
+      for (const t of [p.claim, p.why, p.lever, ...(p.figures ?? []).map((f: any) => f.label)].filter(Boolean) as string[])
+        for (const re of NAMED) {
+          const code = re.exec(t)?.[1]?.replace(/, though it is seldom raised$/, "");
+          const row: any = code ? liftByCode.get(code) ?? (summary.reasonLift as any[]).find((l) => l.code === code) : null;
+          if (!row) continue;
+          floorTally.leads++;
+          if (row.seldom) {
+            floorTally.seldomLeads++;
+            if (!/seldom raised/.test(t)) fail(`${project.brand} ${id}: names the seldom argument "${code}" without saying so: ${t.slice(0, 160)}`);
+          }
+        }
+      // (c) the fixed situation a cell advises on rests on fixedAdviseMin answers.
+      if (p.notes?.wall) {
+        floorTally.walls++;
+        const row = (p.panel?.conditions?.away ?? []).find((r: any) => r.text === p.notes.wall);
+        const k = row ? Number(/^(\d+) of /.exec(row.share?.tip ?? "")?.[1] ?? NaN) : NaN;
+        if (!(k >= FLOORS.fixedAdviseMin)) fail(`${project.brand} ${id}: advises on the fixed situation "${p.notes.wall}" with ${k} answers (floor ${FLOORS.fixedAdviseMin})`);
+      }
+    }
+    // (d) capped lists: no seldom row shown while a qualifying common row was cut.
+    for (const c of (debug as any).capped ?? []) {
+      floorTally.capped++;
+      const shown = new Set(c.shown);
+      const cut = c.all.filter((r: any) => !r.seldom && !shown.has(r.label));
+      const seldomShown = c.all.filter((r: any) => r.seldom && shown.has(r.label));
+      if (cut.length && seldomShown.length) fail(`${project.brand} ${c.where}: shows seldom "${seldomShown[0].label}" while common "${cut[0].label}" was cut (cap ${c.cap})`);
+    }
+    const commonFirst = (where: string, rows: any[]) => {
+      floorTally.cappedOrder++;
+      const i = rows.findIndex((r) => r.seldom);
+      if (i >= 0 && rows.slice(i).some((r) => !r.seldom)) fail(`${project.brand} ${where}: a seldom row ranks above a common one`);
+    };
+    for (const [id, p] of Object.entries(map.positions) as [string, any][]) {
+      commonFirst(`${id} lifts`, p.lifts ?? []);
+      for (const b of p.brands ?? []) commonFirst(`${id} ${b.name} lifts`, b.here?.args ?? []);
+      if (p.panel?.kind === "criteria" && p.panel.table) commonFirst(`${id} table`, p.panel.table.rows);
+    }
+    // (c) every AI-company section lists a company at argsMin answers.
+    for (const m of JSON.stringify(map).matchAll(/sel:vendors~(\d+)/g)) {
+      floorTally.vendorSections++;
+      if (+m[1] < FLOORS.argsMin) fail(`${project.brand}: an AI-company section lists companies at ${m[1]} answers (floor ${FLOORS.argsMin})`);
+    }
+    // (b) The Overview's argument findings lead with an argument that is not seldom raised when one exists.
+    const rl = summary.reasonLift as any[];
+    const posLead = liftLead(rl.filter((l) => l.lift > 0))?.row;
+    const negLead = liftLead([...rl].reverse().filter((l) => l.lift < 0))?.row;
+    for (const ins of rankedInsights(summary, inputs) as any[]) {
+      if (ins.key === "argument" || (ins.key === "taught_vs_winning" && ins.names?.variant === "untaught")) {
+        floorTally.leads++;
+        const row = rl.find((l) => l.code === ins.names?.topic);
+        if (!row) continue;
+        if (row.seldom && rl.some((l) => l.lift > 0 && !l.seldom)) fail(`${project.brand} ${ins.key}: leads with the seldom argument "${row.code}" while "${posLead?.code}" is not seldom`);
+        if (ins.key === "argument" && posLead && row !== posLead) fail(`${project.brand} argument: leads with "${row.code}", the lead is "${posLead.code}"`);
+        if (row.seldom) {
+          floorTally.seldomLeads++;
+          if (!/seldom raised/.test(ins.body)) fail(`${project.brand} ${ins.key}: names the seldom argument "${row.code}" without saying so`);
+        }
+      }
+    }
+    void negLead;
+    // The stations' arguments, from their fact ids alone; each side's first is not seldom when one on that side is.
+    const journey: any = await computeJourneyFromData(data, {});
+    for (const st of journey?.stations ?? []) {
+      const args = st.arguments ?? [];
+      for (const a of args) {
+        floorTally.fromIds++;
+        rowCheck(`station ${st.key}`, a, kn(a.inYourPicks.id), kn(a.inRivalPicks.id));
+      }
+      for (const side of [true, false]) {
+        const xs = args.filter((a: any) => a.forYou === side);
+        commonFirst(`station ${st.key} ${side ? "for" : "against"}`, xs);
+        if (!xs.length) continue;
+        floorTally.leads++;
+        if (xs[0].seldom && xs.some((a: any) => !a.seldom)) fail(`${project.brand} station ${st.key}: the first argument "${xs[0].code}" is seldom raised while another on its side is not`);
+      }
+    }
+    // The dossiers' two ends.
+    const dossiers: any = await computeDossiers(data, {});
+    for (const d of dossiers.dossiers ?? []) {
+      for (const a of [...(d.args ?? []), ...(d.argsAll ?? [])]) rowCheck(`dossier ${d.name}`, a, null, null);
+      const [win, lose] = d.args ?? [];
+      const all = d.argsAll ?? [];
+      if (win) {
+        floorTally.leads++;
+        if (win.seldom && all.some((a: any) => a.value > 0 && !a.seldom)) fail(`${project.brand} dossier ${d.name}: wins on the seldom "${win.label}" while another is not seldom`);
+      }
+      if (lose) {
+        floorTally.leads++;
+        if (lose.seldom && all.some((a: any) => a.value < 0 && !a.seldom)) fail(`${project.brand} dossier ${d.name}: loses on the seldom "${lose.label}" while another is not seldom`);
+      }
+    }
+  }
   console.log(`${project.brand}: ${tally.nums} numbers so far, ${tally.gates} gates, ${tally.verdicts} verdicts`);
 }
 
@@ -263,6 +412,8 @@ console.log(`decisions ${tally.decisions} (fired ${tally.fired}), gates recomput
 console.log(`Shares printed as never / none / every / always, each checked exact: ${tally.words}`);
 console.log(`Lost-with-an-exception figures matched to the card's exception step: ${tally.excChecked}`);
 console.log(`Map numbers sharing a measure and subject with their card: ${tally.cardShared}; counted on the same answers under another id: ${tally.cardDiffer}`);
+console.log(`Capped lists: ${floorTally.capped} checked against what qualified before the cap, ${floorTally.cappedOrder} shown lists checked common-first`);
+console.log(`Floor rulings: ${floorTally.liftRows} lift rows checked for the seldom flag (${floorTally.fromIds} recomputed from fact ids, ${floorTally.fromTips} from their fact counts); ${floorTally.leads} named leads checked (${floorTally.seldomLeads} seldom, each saying so); ${floorTally.walls} fixed-situation lines at ${FLOORS.fixedAdviseMin}+ answers; ${floorTally.vendorSections} AI-company sections at ${FLOORS.argsMin}+ answers`);
 if (failures.length) {
   console.log(`\nFAIL (${failures.length}${failures.length >= 400 ? "+" : ""}):`);
   for (const f of failures.slice(0, 120)) console.log("  " + f);

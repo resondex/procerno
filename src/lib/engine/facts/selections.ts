@@ -43,7 +43,7 @@ import { condRowLabel, pluralNoun, productNoun } from "../panel_text";
 import type { ViewData } from "../view_data";
 import type { AnswerFact, AnswerFactSet, QuestionType } from "./answer_facts";
 import { scopeKey, WHAT_TO_BUY_ALL, type FactBook, type Scope } from "./fact";
-import { MEASURE_BY_ID, PICK_TYPES } from "./measure_book";
+import { FLOORS, MEASURE_BY_ID, PICK_TYPES, seldomOf } from "./measure_book";
 import { cleanQuote, endItems, firstProductOf, pairingCounts, pairingProduct, firstSentOf, insteadProductsOf, ownOptionProductsOf, productsOf, sentProductsOf, slicePred } from "./slices";
 
 /* ------------------------------- the shape ------------------------------- */
@@ -93,8 +93,12 @@ export const SEL_FLOORS = {
   otherPicks: 5,
   /** Condition rows a card lists per side (COND_ROWS). */
   condRows: 6,
-  /** A side of "What the answer weighs" needs this many answers carrying arguments (ARGS_MIN). */
-  argsMin: 10,
+  /** A side of "What the answer weighs" needs this many answers carrying arguments (ARGS_MIN); an AI company needs this
+   * many answers to be listed in a card section (the one floor, FLOORS.argsMin). */
+  argsMin: FLOORS.argsMin,
+  /** The one lift rule (measure_book FLOORS): this many answers a side, a row marked seldom under seldomShare. */
+  liftMinSide: FLOORS.liftMinSide,
+  seldomShare: FLOORS.seldomShare,
   /** A topic belongs to a weighs column only when its share there is this far above the other side's (WEIGHS_GAP). */
   weighsGap: 0.05,
   /** The checklist: the topics raised most, after the too-obvious rule. */
@@ -611,7 +615,7 @@ export interface SelectionOpts {
   rest?: string;
   minK?: number;
   critic?: boolean;
-  /** arg_lift: the floors - "summary" (the brand summary's: 20 answers a side, 2% incidence) or "local" (none). */
+  /** arg_lift: the floors - "summary" (the one lift rule: FLOORS.liftMinSide answers a side) or "local" (none). */
   lift?: "summary" | "local";
 }
 
@@ -720,7 +724,7 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
             : name === "pick_brands"
               ? `~${opts.youFirst ? "you" : "all"}:${opts.top ?? 0}${opts.exclude?.length ? `:x${[...opts.exclude].sort().join(",")}` : ""}`
               : name === "vendors"
-                ? `~${opts.min ?? 3}`
+                ? `~${opts.min ?? SEL_FLOORS.argsMin}`
                 : name === "ends"
                   ? `~${opts.choice}`
                   : name === "first_rec" || name === "first_sent" || name === "sent_products" || name === "sent_own_products" || name === "instead_products" || name === "own_options"
@@ -1063,8 +1067,8 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
         // The AI companies with `min` answers in the scope, by name.
         const by = new Map<string, number>();
         for (const f of rows) by.set(f.engine.vendor, (by.get(f.engine.vendor) ?? 0) + 1);
-        const members = [...by.entries()].filter(([, n]) => n >= (opts.min ?? 3)).map(([v, n]) => ({ key: v, name: v, count: n })).sort((a, b) => a.name.localeCompare(b.name));
-        out = { id, name: fullName, subject, scope, rule: `The AI companies with ${opts.min ?? 3} answers at least in the scope, by name.`, members, extras: {} };
+        const members = [...by.entries()].filter(([, n]) => n >= (opts.min ?? SEL_FLOORS.argsMin)).map(([v, n]) => ({ key: v, name: v, count: n })).sort((a, b) => a.name.localeCompare(b.name));
+        out = { id, name: fullName, subject, scope, rule: `The AI companies with ${opts.min ?? SEL_FLOORS.argsMin} answers at least in the scope, by name.`, members, extras: {} };
         break;
       }
       case "first_rec": {
@@ -1224,8 +1228,10 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
       }
       case "arg_lift": {
         // The arguments that come up more when the subject is the pick than when another brand in analysis is
-        // (ruling 2), with both sides' counts. "summary": both sides 20 answers carrying arguments at least, and an
-        // argument raised in 2% of them (the brand summary's floors); "local": no floor (the card checks its sides).
+        // (ruling 2), with both sides' counts. "summary": both sides FLOORS.liftMinSide answers carrying arguments at
+        // least (the one lift rule; no incidence gate); "local": no floor (the card checks its sides). Every row is marked
+        // seldom when raised in under FLOORS.seldomShare of the two sides' answers (seldomOf); a code raised on neither
+        // side is not a row.
         const key = subjKey(subject);
         const withA = rows.filter((f) => f.args !== null);
         const wins = withA.filter((f) => f.pick.state === "in_analysis" && f.pick.key === key);
@@ -1233,20 +1239,17 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
         const count = (rs: Fact[], code: string) => rs.filter((f) => f.args!.includes(code)).length;
         let codes: string[] = [];
         if (opts.lift === "summary") {
-          if (wins.length >= 20 && others.length >= 20) {
-            const by = new Map<string, number>();
-            for (const f of withA) for (const a of f.args!) by.set(a, (by.get(a) ?? 0) + 1);
-            codes = [...by.entries()].filter(([, k]) => k / withA.length >= 0.02).map(([c]) => c);
-          }
+          if (wins.length >= SEL_FLOORS.liftMinSide && others.length >= SEL_FLOORS.liftMinSide) codes = [...new Set([...wins, ...others].flatMap((f) => f.args!))];
         } else codes = [...new Set([...wins, ...others].flatMap((f) => f.args!))];
         const members = codes
           .map((code) => {
             const w = { k: count(wins, code), n: wins.length };
             const o = { k: count(others, code), n: others.length };
-            return { key: code, name: code, count: w.k, wins: w, others: o, lift: (w.n ? w.k / w.n : 0) - (o.n ? o.k / o.n : 0) };
+            return { key: code, name: code, count: w.k, wins: w, others: o, lift: (w.n ? w.k / w.n : 0) - (o.n ? o.k / o.n : 0), seldom: seldomOf(w, o) };
           })
+          .filter((m) => m.wins.k + m.others.k > 0)
           .sort((a, b) => b.lift - a.lift || a.key.localeCompare(b.key));
-        out = { id, name: fullName, subject, scope, rule: `Every argument, with how often it comes up when the brand is the pick and when another brand in analysis is (ruling 2)${opts.lift === "summary" ? "; both sides 20 answers at least, and an argument in 2% of the answers" : ""}; largest lift first.`, members, extras: { base: wins.length } };
+        out = { id, name: fullName, subject, scope, rule: `Every argument, with how often it comes up when the brand is the pick and when another brand in analysis is (ruling 2)${opts.lift === "summary" ? `; both sides ${SEL_FLOORS.liftMinSide} answers at least` : ""}; an argument raised in under ${Math.round(SEL_FLOORS.seldomShare * 100)}% of the two sides' answers is marked seldom raised; largest lift first.`, members, extras: { base: wins.length } };
         break;
       }
       case "sent_all":
