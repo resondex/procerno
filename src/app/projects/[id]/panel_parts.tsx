@@ -646,6 +646,7 @@ export function BrandRows({ block, onOpen, otherOpen }: { block: PanelBlock; onO
         </div>
         )
       )}
+      {block.other && <OtherList other={block.other} title={block.title} initialOpen={otherOpen} />}
     </Blk>
   );
 }
@@ -679,8 +680,8 @@ function OtherBar({ row, initialOpen }: { row: PanelBrandRow; initialOpen?: bool
 }
 
 /** The competitor group's "Other" row in a step (comparison view): no bar; a toggle that opens the brands inside it. */
-function OtherList({ other, title, dim }: { other: PanelOther; title: string; dim?: boolean }) {
-  const [open, setOpen] = useState(false);
+function OtherList({ other, title, dim, initialOpen }: { other: PanelOther; title: string; dim?: boolean; initialOpen?: boolean }) {
+  const [open, setOpen] = useState(!!initialOpen);
   return (
     <span className="block">
       <button type="button" onClick={() => setOpen((x) => !x)} aria-expanded={open} className={`${T.cap} flex w-full items-center gap-1.5 py-[3px] text-left text-ink-2 hover:text-ink`}>

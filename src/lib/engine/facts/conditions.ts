@@ -15,7 +15,10 @@
  *  - "m:<side>:<hash>"  the Map's own grouping (scope "analysis_map"): the cards read it for the both-ways pairs and
  *                       when a run has no themes.
  *  - "p:<side>:<hash>"  the Map's grouping of Premium vs basic rules by the end they choose (premium = toward,
- *                       basic = away), the Premium vs basic card's condition rows.
+ *                       basic = away) - read by the proofs only (today's card).
+ *  - "q:<side>:<hash>"  the Premium vs basic card's condition rows (ruling 14): its rules by the end they choose,
+ *                       grouped on the run's ONE condition grouping (the rules explorer's condition keys - the key
+ *                       RuleGroup.cond hashes). The reason themes are sided by brand, so they cannot serve here.
  *
  * FOUND, for Tyler: the cards read TWO saved condition groupings of the same run (scope "rules" for the themed rows,
  * scope "analysis_map" for the both-ways pairs and the Premium vs basic rows). Both are read here as saved; which one
@@ -149,6 +152,24 @@ export async function attachConditions(set: AnswerFactSet, data: ViewData, opts:
       const theme = st !== undefined && tm && pool ? `t:${pool}:${tm.totOf[st]}` : null;
       add(rid, { unit: `g:${g.id}`, grouping: "group", side, label: g.label, ...base, groups: [g.id], theme, keys: [g.cond] });
       if (theme && tm && st !== undefined) add(rid, { unit: theme, grouping: "theme", side: pool!, label: tm.totName[tm.totOf[st]], ...base, groups: [g.id], keys: [g.cond] });
+    }
+  }
+
+  // 1b. Premium vs basic (ruling 14): rules by the end they choose, on the run-wide condition keys.
+  for (const f of set.facts) {
+    if (f.type !== "premium_worth") continue;
+    const c = codeById.get(f.responseId);
+    for (const rule of c?.decision_rules ?? []) {
+      const w = rule.condition.trim();
+      const tier = rule.choice.trim() === "premium" ? "toward" : rule.choice.trim() === "basic" ? "away" : null;
+      if (!w || !tier) continue;
+      const ck = shortHash(rules.condKeyOf(w));
+      const m = mapRule(rule, c!.schema, set.resolve, set.target.key);
+      const prod = rule.product?.trim() ?? "";
+      // The rows name a destination only on the basic side (as the card always has).
+      const tTo = tier === "away" && m.to ? [m.to.name] : [];
+      const tKeys = tier === "away" && m.to ? [m.to.key] : [];
+      add(f.responseId, { unit: `q:${tier}:${ck}`, grouping: "tier", side: tier, label: w, said: w, to: tTo, toKeys: tKeys, cards: prod ? [prod] : [], cardTo: prod ? [tTo[0] ?? null] : [], keys: [ck] });
     }
   }
 

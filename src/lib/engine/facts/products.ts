@@ -20,7 +20,10 @@
  *
  * Each product carries a full name (the form most answers write) and a short name (the brand's leading words
  * dropped). The answer facts gain `pick.product` (null = the pick names no specific product of the brand), and the
- * set a lookup from (brand, name as written) to its product. Pure: reads the answer facts only, no model calls.
+ * set a lookup from (brand, name as written) to its product. A name that passes the test but no pick holds (a product
+ * the AI names and never picks) forms a product of its own by the same join rule, after the picks, read only by the
+ * lists of products named (`nameProductOf`) - a picked product's row never changes. Pure: reads the answer facts only,
+ * no model calls.
  */
 import { famTokens } from "../brand_family";
 import { pluralNoun, productNoun } from "../panel_text";
@@ -139,4 +142,55 @@ export function attachProducts(set: AnswerFactSet, category: string): void {
   set.productTest = test;
   set.productOf = productOf;
   for (const f of set.facts) if (f.pick.key && f.pick.written && f.pick.state === "in_analysis") f.pick.product = productOf(f.pick.key, f.pick.written);
+
+  // Names the answers write that pass the product test but no pick holds (a product the AI names and never picks):
+  // grouped by the same join rule among themselves, after the picks - so a picked product's row never changes - and
+  // read only by the lists of products NAMED (nameProductOf). Ids "m~<brand>~<words>".
+  const mItems: ProductItem[] = [];
+  const seen = new Set<string>();
+  const offer = (answer: string, key: string, written: string) => {
+    const w = written.trim();
+    if (!w || productOf(key, w) || !test.passes(w)) return;
+    const k = `${answer}\u0000${key}\u0000${w.toLowerCase()}`;
+    if (seen.has(k)) return;
+    seen.add(k);
+    mItems.push({ answer, key, written: w });
+  };
+  // Mentions only: rule choices and products write combined names that would bridge two products (as for the picks).
+  for (const f of set.facts) for (const b of f.brands) if (b.bucket === "in_analysis" && b.mentioned) for (const w of b.forms) offer(f.responseId, b.key, w);
+  const mRows = productGroups(mItems, set, "merge", { category });
+  const mByForm = new Map<string, string>();
+  const mToks = new Map<string, { id: string; toks: Set<string> }[]>();
+  for (const r of mRows) {
+    const id = `m~${r.id}`;
+    let o = own.get(r.key);
+    if (!o) own.set(r.key, (o = brandNameTokens(set, r.key)));
+    products.set(id, { id, key: r.key, full: r.name, short: shortProductName(r.name, o), forms: r.forms });
+    for (const f of r.forms) {
+      mByForm.set(`${r.key}\u0000${f.toLowerCase()}`, id);
+      const list = mToks.get(r.key) ?? [];
+      list.push({ id, toks: new Set(productTokens(f, r.key, set, category)) });
+      mToks.set(r.key, list);
+    }
+  }
+  const nMemo = new Map<string, string | null>();
+  set.nameProductOf = (brandKey: string, written: string): string | null => {
+    const hit = productOf(brandKey, written);
+    if (hit) return hit;
+    const mk = `${brandKey}\u0000${productForm(written).toLowerCase()}`;
+    if (nMemo.has(mk)) return nMemo.get(mk)!;
+    let out: string | null = null;
+    if (test.passes(written)) {
+      out = mByForm.get(mk) ?? null;
+      if (!out) {
+        const toks = productTokens(written, brandKey, set, category);
+        const list = mToks.get(brandKey) ?? [];
+        const exact = [...new Set(list.filter((x) => x.toks.size === toks.length && toks.every((t) => x.toks.has(t))).map((x) => x.id))];
+        const within = [...new Set(list.filter((x) => toks.length > 0 && toks.every((t) => x.toks.has(t))).map((x) => x.id))];
+        out = exact.length === 1 ? exact[0] : exact.length === 0 && within.length === 1 ? within[0] : null;
+      }
+    }
+    nMemo.set(mk, out);
+    return out;
+  };
 }

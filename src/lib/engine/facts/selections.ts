@@ -35,7 +35,7 @@ import type { ViewData } from "../view_data";
 import type { AnswerFact, AnswerFactSet, QuestionType } from "./answer_facts";
 import { scopeKey, WHAT_TO_BUY_ALL, type FactBook, type Scope } from "./fact";
 import { MEASURE_BY_ID, PICK_TYPES } from "./measure_book";
-import { slicePred } from "./slices";
+import { endItems, firstProductOf, productsOf, slicePred } from "./slices";
 
 /* ------------------------------- the shape ------------------------------- */
 
@@ -166,6 +166,8 @@ const AS_CARDS_RULE: Record<CompetitorCard, string> = {
 
 export const RATIFIED_COMPETITORS_RULE =
   "The three rivals with the most picks of a brand in analysis, then the tracker's head-to-head rivals not among them (tagged head-to-head); class brands stay out; listed rivals keep picks order. Other: every remaining brand in analysis - by name when named in at least 10% of the answers or picked at least 5 times, the rest as a count.";
+export const RATIFIED_COMPETITORS_REC_RULE =
+  "The ratified shape ranked by recommendations (cards that take few picks): the three rivals recommended in the most answers (a pick counts as recommended), then the tracker's head-to-head rivals not among them (tagged head-to-head); class brands stay out; listed rivals keep that order. Other: every remaining brand in analysis - by name when named in at least 10% of the answers or picked at least 5 times, the rest as a count.";
 
 export interface CompetitorExtras {
   mode: "ratified" | "as_cards";
@@ -221,7 +223,7 @@ function competitorsAsCards(set: AnswerFactSet, rows: Fact[], scope: Scope, card
   return list.filter((b) => b.key !== T && b.count >= floor && !(dropClass && cls.has(b.key)) && b.key !== leaving).slice(0, F.compTop);
 }
 
-function competitorsRatified(set: AnswerFactSet, rows: Fact[], scope: Scope): { members: SelMember[]; extras: CompetitorExtras } {
+function competitorsRatified(set: AnswerFactSet, rows: Fact[], scope: Scope, rankBy: "picks" | "recommended" = "picks"): { members: SelMember[]; extras: CompetitorExtras } {
   for (const t of scope.types) if (!PICK_TYPES.includes(t)) throw new Error(`selection "competitors" (ratified): ranks by picks, and question type "${t}" takes no picks - refused (use mode "as_cards" for today's card)`);
   const T = set.target.key;
   const cls = classKeysOf(set);
@@ -229,25 +231,30 @@ function competitorsRatified(set: AnswerFactSet, rows: Fact[], scope: Scope): { 
   const picks = new Map<string, number>();
   for (const f of inPick) picks.set(f.pick.key!, (picks.get(f.pick.key!) ?? 0) + 1);
   const named = new Map<string, number>();
+  const recs = new Map<string, number>();
   const names = new Map<string, string>();
   for (const f of rows)
     for (const b of f.brands)
       if (b.bucket === "in_analysis") {
         named.set(b.key, (named.get(b.key) ?? 0) + 1);
+        if (b.recommended) recs.set(b.key, (recs.get(b.key) ?? 0) + 1);
         names.set(b.key, b.name);
       }
   const pk = (k: string) => picks.get(k) ?? 0;
-  const byPicks = (a: { key: string; name: string }, b: { key: string; name: string }) => pk(b.key) - pk(a.key) || a.name.localeCompare(b.name);
+  // The ranking measure: picks (the pick cards), or recommendations (What's popular and Premium vs basic, which take
+  // few picks) - the card's own measure, the ratified shape either way.
+  const rk = (k: string) => (rankBy === "recommended" ? recs.get(k) ?? 0 : pk(k));
+  const byRank = (a: { key: string; name: string }, b: { key: string; name: string }) => rk(b.key) - rk(a.key) || a.name.localeCompare(b.name);
   // A rival being left (a switching cell) is the question's own brand, never one of its competitors.
   const leaving = scope.types.length === 1 && scope.types[0] === "switching" ? scope.rival : undefined;
-  const rivals = [...names.entries()].map(([key, name]) => ({ key, name })).filter((b) => b.key !== T && !cls.has(b.key) && b.key !== leaving && pk(b.key) > 0);
-  const top = rivals.sort(byPicks).slice(0, SEL_FLOORS.ratifiedTop);
-  const listed: SelMember[] = top.map((b) => ({ key: b.key, name: b.name, count: pk(b.key) }));
+  const rivals = [...names.entries()].map(([key, name]) => ({ key, name })).filter((b) => b.key !== T && !cls.has(b.key) && b.key !== leaving && rk(b.key) > 0);
+  const top = rivals.sort(byRank).slice(0, SEL_FLOORS.ratifiedTop);
+  const listed: SelMember[] = top.map((b) => ({ key: b.key, name: b.name, count: rk(b.key) }));
   const h2h = headToHeadKeysOf(set)
     .filter((b) => !listed.some((x) => x.key === b.key) && b.key !== leaving && !cls.has(b.key))
     .map((b) => ({ key: b.key, name: names.get(b.key) ?? set.nameOf(b.key) }))
-    .sort(byPicks);
-  for (const b of h2h) listed.push({ key: b.key, name: b.name, count: pk(b.key), headToHead: true });
+    .sort(byRank);
+  for (const b of h2h) listed.push({ key: b.key, name: b.name, count: rk(b.key), headToHead: true });
   const inListed = new Set(listed.map((b) => b.key));
   const others = [...names.keys()].filter((k) => k !== T && !inListed.has(k));
   for (const k of picks.keys()) if (k !== T && !inListed.has(k) && !others.includes(k)) others.push(k);
@@ -457,7 +464,7 @@ export function shortProductName(full: string, own: Set<string>): string {
 
 /** Which saved grouping a card's condition rows read (conditions.ts): the run's themes (with the "elsewhere" groups
  * beside the away themes), the Map's grouping when the run has no themes, or the Premium vs basic card's tier rows. */
-export type CondFlavor = "themed" | "map" | "tier" | "group";
+export type CondFlavor = "themed" | "map" | "tier" | "group" | "tierwide";
 
 export interface CondRow {
   /** The row's label (sentence case, as the cards print it). */
@@ -488,7 +495,7 @@ interface Src {
 function condSources(rows: Fact[], side: "toward" | "away", flavor: CondFlavor, to?: string): Src[] {
   // "group": the run-wide groups themselves (ruling 14), when the run has no themes.
   const ok = (u: string, c?: { grouping: string; side: string }) =>
-    flavor === "themed" ? u.startsWith(`t:${side}:`) || (side === "away" && u.startsWith("g:elsewhere:")) : flavor === "group" ? !!c && c.grouping === "group" && c.side === side : u.startsWith(`${flavor === "map" ? "m" : "p"}:${side}:`);
+    flavor === "themed" ? u.startsWith(`t:${side}:`) || (side === "away" && u.startsWith("g:elsewhere:")) : flavor === "group" ? !!c && c.grouping === "group" && c.side === side : u.startsWith(`${flavor === "map" ? "m" : flavor === "tierwide" ? "q" : "p"}:${side}:`);
   const label = new Map<string, string>();
   const said = new Map<string, Map<string, number>>();
   const ids = new Map<string, Set<string>>();
@@ -533,6 +540,12 @@ function condSources(rows: Fact[], side: "toward" | "away", flavor: CondFlavor, 
 export interface SelectionOpts {
   /** competitors / averageCompetitor: "ratified" (default) or "as_cards" (with `card`). */
   mode?: "ratified" | "as_cards";
+  /** competitors (ratified): the card's own ranking measure - picks (default) or recommendations. */
+  rankBy?: "picks" | "recommended";
+  /** ends: the end a rule chooses ("premium" / "basic"). */
+  choice?: string;
+  /** vendors: the fewest answers an AI company needs in the scope. */
+  min?: number;
   card?: CompetitorCard;
   /** conditions_shown: the side, the grouping, and an answer filter on the toward side (a lost-with-an-exception
    * card counts its toward rows only in the answers that pick the rival - a slice). */
@@ -552,6 +565,8 @@ export interface SelectionOpts {
   to?: string;
   /** product_picks: the brand whose picks are listed (entry id) and how many products. */
   brand?: string;
+  /** pick_brands: the tracker first, then the others (Habit's "who gets it"). */
+  youFirst?: boolean;
 }
 
 /** A weighs column: its topics in drawn order (code and the side's count), or too few answers to size. */
@@ -594,7 +609,17 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
         ? `~${(opts.units ?? []).join("+")}${opts.to ? `>to:${opts.to}` : ""}`
         : name === "product_picks"
           ? `~${opts.brand ?? "you"}:${opts.top ?? 2}`
-          : name === "competitors" ? `~${opts.mode ?? "ratified"}${opts.mode === "as_cards" ? `:${opts.card}` : ""}` : name === "conditions_shown" ? `~${opts.side}:${opts.flavor}${opts.towardOnly ? `@${opts.towardOnly}` : ""}${opts.to ? `>to:${opts.to}` : ""}` : name === "weighs_shown" ? `~${JSON.stringify(opts.sides ?? [{}])}:${opts.top ?? 3}:${opts.list ?? "weighs"}` : "";
+          : name === "product_names" || name === "product_first" || name === "product_suggested"
+            ? `~${opts.brand ?? "you"}:${opts.top ?? 0}`
+            : name === "pick_brands"
+              ? `~${opts.youFirst ? "you" : "all"}:${opts.top ?? 0}`
+              : name === "vendors"
+                ? `~${opts.min ?? 3}`
+                : name === "ends"
+                  ? `~${opts.choice}`
+                  : name === "first_rec"
+                    ? `~${opts.top ?? 4}`
+                    : name === "competitors" ? `~${opts.mode ?? "ratified"}${opts.mode === "as_cards" ? `:${opts.card}` : ""}${opts.rankBy === "recommended" ? ":rec" : ""}` : name === "conditions_shown" ? `~${opts.side}:${opts.flavor}${opts.towardOnly ? `@${opts.towardOnly}` : ""}${opts.to ? `>to:${opts.to}` : ""}` : name === "weighs_shown" ? `~${JSON.stringify(opts.sides ?? [{}])}:${opts.top ?? 3}:${opts.list ?? "weighs"}` : "";
     const fullName = `${name}${params}`;
     const id = selectionId(fullName, subject, scope);
     const hit = memo.get(id);
@@ -608,8 +633,8 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
           if (!opts.card) throw new Error(`selection "competitors" (as_cards): name the card kind`);
           out = { id, name: fullName, subject, scope, rule: AS_CARDS_RULE[opts.card], members: competitorsAsCards(set, rows, scope, opts.card), extras: { mode: "as_cards", card: opts.card } };
         } else {
-          const r = competitorsRatified(set, rows, scope);
-          out = { id, name: fullName, subject, scope, rule: RATIFIED_COMPETITORS_RULE, members: r.members, extras: r.extras };
+          const r = competitorsRatified(set, rows, scope, opts.rankBy);
+          out = { id, name: fullName, subject, scope, rule: opts.rankBy === "recommended" ? RATIFIED_COMPETITORS_REC_RULE : RATIFIED_COMPETITORS_RULE, members: r.members, extras: r.extras };
         }
         break;
       }
@@ -832,6 +857,100 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
         }
         members.sort((x, y) => y.count - x.count || x.name.localeCompare(y.name));
         out = { id, name: fullName, subject, scope, rule: "Conditions stated on both sides under the run's one condition grouping: each side 3 answers and 5% of the answers stating conditions at least, the smaller side half the larger, never a reason paired with its negation; most stated first.", members: members as unknown as SelMember[], extras: { base: bearing } };
+        break;
+      }
+      case "h2h_rivals": {
+        // The named rivals of the scope's head-to-heads that the AI picks over you, by the answers picking each in its
+        // own matchup (1 at least), most first, ties by name, top five (the all-rivals card's bars).
+        const by = tally(rows.filter((f) => !!f.rival && f.pick.state !== "none" && f.pick.key === f.rival.key && f.pick.key !== T), (f) => [{ key: f.rival!.key, name: f.rival!.name }]);
+        out = { id, name: fullName, subject, scope, rule: "The named rivals the AI picks in their own head-to-head (1 answer at least), most picks first, ties by name, top five.", members: rank(by).slice(0, SEL_FLOORS.compTop), extras: {} };
+        break;
+      }
+      case "product_names":
+      case "product_suggested": {
+        // A brand's products (the run's one product grouping, short names) the scope's answers name: product_names any
+        // written form of the brand naming the product; product_suggested a form framed recommended, or a rule's choice
+        // or product resolving to the brand. Counted by answers, 3 at least, most first (ties by name), top `top`.
+        const key = subjKey(opts.brand ?? "you");
+        const term = name === "product_names" ? "nameprod" : "suggprod";
+        const by = new Map<string, { name: string; ids: Set<string> }>();
+        for (const f of rows)
+          for (const pid of productsOf(f, key, term === "suggprod", set)) {
+            const t = by.get(pid) ?? { name: set.products!.get(pid)!.short, ids: new Set<string>() };
+            t.ids.add(f.responseId);
+            by.set(pid, t);
+          }
+        // No floor here: a card draws the rows of 3+ answers (sorted by count, the top `top` then the floor is the
+        // floor then the top) and says so in a sentence when none clears it.
+        out = { id, name: fullName, subject, scope, rule: `The brand's products (the run's one product grouping) ${term === "nameprod" ? "the answers name" : "the answers suggest (recommended, or a rule's choice or product)"}: most answers first, ties by name (a card draws those with 3 answers at least).`, members: rank(by).slice(0, opts.top ?? 5), extras: { base: rows.length } };
+        break;
+      }
+      case "product_first": {
+        // Per answer, the brand's product its first written form that names one (the run's product grouping); "~none"
+        // for an answer naming no specific product of it. Members by answers, most first, ties by name, top `top`.
+        const key = subjKey(opts.brand ?? "you");
+        const by = new Map<string, { name: string; ids: Set<string> }>();
+        for (const f of rows) {
+          const pid = firstProductOf(f, key, set) ?? "~none";
+          // A product the grouping holds no row for is no row here (and never "no specific product").
+          if (pid === "~unplaced") continue;
+          const t = by.get(pid) ?? { name: pid === "~none" ? "~none" : set.products!.get(pid)!.short, ids: new Set<string>() };
+          t.ids.add(f.responseId);
+          by.set(pid, t);
+        }
+        out = { id, name: fullName, subject, scope, rule: "Per answer, the product the brand's first written form names (the run's one product grouping), or no specific product (a form naming no product); a product with no row in the grouping is no row; most answers first, ties by name.", members: rank(by).slice(0, opts.top ?? 2), extras: { base: rows.length } };
+        break;
+      }
+      case "pick_brands": {
+        // The brands in analysis the scope's answers pick, by picks: every one with 3 at least, most first (ties by
+        // name); or (youFirst) the tracker, then the `top` others with the most picks.
+        const by = tally(rows.filter((f) => f.pick.state === "in_analysis"), (f) => [{ key: f.pick.key!, name: f.pick.key === T ? set.target.name : f.pick.name! }]);
+        const list = rank(by);
+        const members = opts.youFirst
+          ? [list.find((b) => b.key === T) ?? { key: T, name: set.target.name, count: 0 }, ...list.filter((b) => b.key !== T).slice(0, opts.top ?? 3)]
+          : list.filter((b) => b.count >= SEL_FLOORS.rowMin);
+        out = { id, name: fullName, subject, scope, rule: opts.youFirst ? "The tracker, then the three other brands in analysis picked most (a card draws those with 3 picks at least)." : "Every brand in analysis picked in 3 answers at least, most picks first, ties by name.", members, extras: { base: rows.filter((f) => f.pick.state === "in_analysis").length } };
+        break;
+      }
+      case "vendors": {
+        // The AI companies with `min` answers in the scope, by name.
+        const by = new Map<string, number>();
+        for (const f of rows) by.set(f.engine.vendor, (by.get(f.engine.vendor) ?? 0) + 1);
+        const members = [...by.entries()].filter(([, n]) => n >= (opts.min ?? 3)).map(([v, n]) => ({ key: v, name: v, count: n })).sort((a, b) => a.name.localeCompare(b.name));
+        out = { id, name: fullName, subject, scope, rule: `The AI companies with ${opts.min ?? 3} answers at least in the scope, by name.`, members, extras: {} };
+        break;
+      }
+      case "first_rec": {
+        // Of the answers suggesting another brand (rec:anyother), the brand each suggests first; most first, ties by
+        // name, top `top`.
+        const pr = slicePred("rec:anyother", set);
+        const by = new Map<string, { name: string; ids: Set<string> }>();
+        for (const f of rows) {
+          if (!pr(f)) continue;
+          const xs = f.brands.filter((b) => b.key !== T && b.recommended && b.bucket !== "outside_category").map((b) => ({ b, o: b.mentioned ? b.order : 1000 + b.order })).sort((a, b) => a.o - b.o);
+          const b = xs[0]?.b;
+          if (!b) continue;
+          const t = by.get(b.key) ?? { name: b.name, ids: new Set<string>() };
+          t.ids.add(f.responseId);
+          by.set(b.key, t);
+        }
+        out = { id, name: fullName, subject, scope, rule: "Of the answers that suggest another brand, the brand each suggests first; most first, ties by name.", members: rank(by).slice(0, opts.top ?? 4), extras: { base: rows.filter(pr).length } };
+        break;
+      }
+      case "suggested": {
+        // The other brands the answers suggest (recommended, a pick counting - ruling 6; in the category), 3 answers at
+        // least, most first, ties by name, top five (the Habit card's "Which brands it suggests instead").
+        const by = tally(rows, (f) => f.brands.filter((b) => b.key !== T && b.recommended && b.bucket !== "outside_category").map((b) => ({ key: b.key, name: b.name })));
+        out = { id, name: fullName, subject, scope, rule: "The other brands the answers suggest (recommended, a pick counting), 3 answers at least, most first, ties by name, top five.", members: rank(by).filter((m) => m.count >= SEL_FLOORS.rowMin).slice(0, SEL_FLOORS.compTop), extras: {} };
+        break;
+      }
+      case "ends": {
+        // Who a Premium vs basic answer gives as the example of one end: the products its rules choosing that end name -
+        // a brand in the category by its entry (the tracker as "You"), any other name as written (descriptions of an
+        // end left out; plural endings and name variants one row). 3 answers at least, most first, ties by name, top 5.
+        const choice = opts.choice ?? "premium";
+        const items = endItems(rows, choice, set, data?.project.category ?? "");
+        out = { id, name: fullName, subject, scope, rule: `The names a rule choosing ${choice} gives as its product: brands in the category by entry, other names as written (variants one row); 3 answers at least, most first, top five.`, members: items.filter((m) => m.count >= SEL_FLOORS.rowMin).slice(0, 5), extras: {} };
         break;
       }
       case "visibility_brands": {

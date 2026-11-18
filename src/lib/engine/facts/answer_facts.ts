@@ -148,6 +148,8 @@ export interface NamedBrand {
   /** Every surface form as written, in order of first appearance, deduplicated (the pick's form last when the
    * answer only names it as the pick) - the input of the product-name groupings (selections.ts). */
   forms: string[];
+  /** The forms of its mentions framed recommended, as written, deduplicated (the pick not counted). */
+  recForms: string[];
 }
 
 export interface SentTo {
@@ -233,6 +235,8 @@ export interface AnswerFactSet {
   products?: Map<string, ProductInfo>;
   /** The product a brand's name as written falls in (null = names no product beyond the brand). */
   productOf?: (brandKey: string, written: string) => string | null;
+  /** productOf, and for a product no pick holds its own product (the lists of products NAMED read this). */
+  nameProductOf?: (brandKey: string, written: string) => string | null;
   /** The product test behind the grouping (products.ts productTest): proofs read its decisions. */
   productTest?: import("./products").ProductTest;
 }
@@ -448,6 +452,7 @@ export function buildAnswerFacts(data: ViewData, opts: BuildOptions = {}): Answe
       const prev = byKey.get(r.key);
       if (prev) {
         if (m.framing === "recommended") prev.recommended = prev.framedRecommended = true;
+        if (m.framing === "recommended" && !prev.recForms.includes(m.brand)) prev.recForms.push(m.brand);
         if (m.framing === "negative") prev.negative = true;
         if (!prev.forms.includes(m.brand)) prev.forms.push(m.brand);
         continue;
@@ -463,6 +468,7 @@ export function buildAnswerFacts(data: ViewData, opts: BuildOptions = {}): Answe
         mentioned: true,
         written: m.brand,
         forms: [m.brand],
+        recForms: m.framing === "recommended" ? [m.brand] : [],
       });
     }
     if (pick.key && pick.state !== "none") {
@@ -470,7 +476,7 @@ export function buildAnswerFacts(data: ViewData, opts: BuildOptions = {}): Answe
       if (prev) {
         prev.recommended = true;
         if (!prev.forms.includes(pick.written!)) prev.forms.push(pick.written!);
-      } else byKey.set(pick.key, { key: pick.key, name: pick.name!, bucket: pick.state, recommended: true, framedRecommended: false, negative: false, order: byKey.size, mentioned: false, written: pick.written!, forms: [pick.written!] });
+      } else byKey.set(pick.key, { key: pick.key, name: pick.name!, bucket: pick.state, recommended: true, framedRecommended: false, negative: false, order: byKey.size, mentioned: false, written: pick.written!, forms: [pick.written!], recForms: [] });
     }
 
     // Where the buyer is sent.

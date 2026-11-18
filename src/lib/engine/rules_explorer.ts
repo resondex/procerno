@@ -341,6 +341,9 @@ export interface RulesCapture {
    * the group, its away destinations, engine and question (the panels'
    * receipts and routes). */
   answerRules?: Map<string, Map<string, AnswerRule>>;
+  /** Fact layer (ruling 14): the run's one condition grouping, looked up - a wording's condition key (the key
+   * RuleGroup.cond hashes). Filled by computeRules; reading it groups nothing. */
+  condKeyOf?: (condition: string) => string;
 }
 
 export async function computeRules(data: ViewData, request: ViewRequest = {}, capture?: RulesCapture): Promise<RulesView> {
@@ -403,6 +406,7 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}, ca
   });
   const grouping: RulesView["grouping"] = [...condKeys.values()].some((k) => k.startsWith("e:")) ? "embeddings" : "stems";
   const keyOf = (c: string) => condKeys.get(c) ?? conditionStemKey(c, exclude);
+  if (capture) capture.condKeyOf = keyOf;
 
   // Head-to-head rival per cell (entity: the angle; class: the class brand).
   const forms: { seq: string[]; entry: DictionaryEntry }[] = [];

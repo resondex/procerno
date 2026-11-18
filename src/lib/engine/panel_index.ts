@@ -222,6 +222,9 @@ function panelState(pp: PositionPanel, usualSteps: PanelStep[] | undefined, comp
         num(w, r.num, `${pp.competitors!.title} - ${r.shown ?? (r.you ? "You" : r.name)}`, `competitors/${r.you ? "you" : r.other ? "~other" : k(r.name)}`);
         if (r.other && other) for (const x of r.other.rows) num(w, x.num, `${pp.competitors!.title} - Other - ${x.name}`, `competitors/~other/${k(x.name)}`);
       }
+    // The competitor group's Other row with no bar (its brands drawn when it is opened).
+    if (b === "competitors" && competitorsShown(pp, comp) && other && pp.competitors!.other)
+      for (const x of pp.competitors!.other.rows) num(w, x.num, `${pp.competitors!.title} - Other - ${x.name}`, `competitors/~other/${k(x.name)}`);
     if (b === "lines") for (const l of (comp ? pp.linesComp ?? pp.lines : pp.lines) ?? []) text(w, l.value, `lines/${k(l.key ?? l.label)}`, l.label);
     if (b === "weighs") {
       const x = comp ? pp.weighsComp ?? pp.weighs : pp.weighs;
@@ -285,7 +288,7 @@ export function walkPanel(p: Position, usualSteps?: PanelStep[]): WalkEntry[] {
   if (selectable) for (const s of pp.steps) if (s.key !== defaultSel && pp.details?.[s.key]) out.push(...tag(panelState(pp, usualSteps, false, s.key, false, false, P), "one", { step: s.key }));
   if (pp.compare) out.push(...tag(panelState(pp, usualSteps, true, panelSelection(pp, true).defaultSel, false, false, P), "one", { competitors: true }));
   // The competitor group's Other rows, opened (with competitors shown).
-  if (pp.compare && (pp.steps.some((s) => !!s.other) || pp.competitors?.rows.some((r) => !!r.other)))
+  if (pp.compare && (pp.steps.some((s) => !!s.other) || pp.competitors?.rows.some((r) => !!r.other) || !!pp.competitors?.other))
     out.push(...tag(panelState(pp, usualSteps, true, panelSelection(pp, true).defaultSel, false, false, P, true), "one", { competitors: true, fold: "other" }));
   if (pp.conditions && conditionsFold(pp.conditions.toward, pp.conditions.away)) out.push(...tag(panelState(pp, usualSteps, false, defaultSel, true, false, P), "one", { fold: "conditions" }));
   out.push(...tag(panelState(pp, usualSteps, false, defaultSel, false, true, P), "one", { fold: "outcomes" }));

@@ -12,9 +12,9 @@ import { filterObvious, type Omission, type OmissionList } from "./panel_filter"
 import { NOWHERE_CLEAR, AVG_COMP, CLOSE_PTS, GAP_TAKEAWAY, TAKEAWAY_TAGS, TAG_FURTHEST, TAG_GAP_OPENS, agreesTakeaway, alongsideTakeaway, avgTag, caseTakeaway, criticStrengthTakeaway, duelTag, insteadTakeaway, keepTakeaway, leanOf, offersTakeaway, oftenOf, premiseTakeaway, tierTakeaway, habitTakeaway, suggestTakeaway, relationshipTakeaway, proceedTakeaway, stanceTakeaway, taughtTakeaway, usualDir, duelTone, focusOf, neutralUsualTag, otherTag, rankTag, segTag, toneOfTag, usualTag, usualTone, worthTakeaway, type KN, type Takeaway } from "./panel_tags";
 import { ROW_NAME } from "./question_names";
 import type { AnswerFact, AnswerFactSet, QuestionType } from "./facts/answer_facts";
-import { scopeKey, type Fact, type FactBook, type Scope } from "./facts/fact";
+import { scopeKey, WHAT_TO_BUY_ALL, type Fact, type FactBook, type Scope } from "./facts/fact";
 import { MEASURE_BY_ID, printOf } from "./facts/measure_book";
-import { averageCompetitor, type AnySelection, type CondRow, type SelMember, type SelectionBook, type WeighsColumn } from "./facts/selections";
+import { averageCompetitor, type AnySelection, type CondFlavor, type CondRow, type SelMember, type SelectionBook, type WeighsColumn } from "./facts/selections";
 import {
   F,
   N,
@@ -431,7 +431,18 @@ export function buildPanels(inputs: Map<string, PanelCellInput>, h: PanelHelpers
   // The By rival tab still reads the old pick cards' claim and condition rows (it is not on the fact layer yet).
   if (h.facts) {
     const legacy = new Map<string, PositionPanel>();
-    for (const inp of inputs.values()) if (isFactKind(inp.kind)) legacy.set(inp.id, pickPanel(inp, ctx));
+    for (const inp of inputs.values()) {
+      if (isFactKind(inp.kind)) legacy.set(inp.id, pickPanel(inp, ctx));
+      // The By rival tab also reads the head-to-head cards' claim, explanation heading and condition rows, and What's
+      // popular's toward rows - from the old builders until the By rival pages move onto the fact layer.
+      else if (inp.kind === "popular") legacy.set(inp.id, popularPanel(inp, ctx));
+      else if (inp.kind === "h2h") {
+        const lp = h2hPanel(inp, ctx);
+        detailOf(inp, lp, undefined, ctx);
+        extremeFacts(inp, lp, ctx);
+        legacy.set(inp.id, lp);
+      }
+    }
     LEGACY.set(panels, legacy);
   }
   // Panel 11's "Where it takes its picks" across the row's split cells.
@@ -488,7 +499,7 @@ function buildPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel | undefined {
     case "switching":
       return ctx.h.facts ? factPickPanel(inp, ctx) : pickPanel(inp, ctx);
     case "h2h":
-      return h2hPanel(inp, ctx);
+      return ctx.h.facts ? factH2hPanel(inp, ctx) : h2hPanel(inp, ctx);
     case "buyer_worry":
     case "customer_worry":
       return worryPanel(inp, ctx);
@@ -505,7 +516,7 @@ function buildPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel | undefined {
     case "business_case":
       return casePanel(inp, ctx);
     case "popular":
-      return popularPanel(inp, ctx);
+      return ctx.h.facts ? factPopularPanel(inp, ctx) : popularPanel(inp, ctx);
     case "learning":
       return learningPanel(inp, ctx);
     case "alongside":
@@ -513,9 +524,9 @@ function buildPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel | undefined {
     case "critic":
       return criticPanel(inp, ctx);
     case "premium":
-      return premiumPanel(inp, ctx);
+      return ctx.h.facts ? factPremiumPanel(inp, ctx) : premiumPanel(inp, ctx);
     case "habit":
-      return habitPanel(inp, ctx);
+      return ctx.h.facts ? factHabitPanel(inp, ctx) : habitPanel(inp, ctx);
     case "settled_all":
       return settledAllPanel(inp, ctx);
   }
@@ -3269,14 +3280,38 @@ function factWeighs(
 /** The condition rows from facts (rulings 4 and 14): the rows are the conditions_shown selection of each side, each
  * number a condition fact; "Also said for ..." is the other side's own row (same reason under near-identical names)
  * or, under the run's one grouping, the same condition stated for the other side (the cond_pairs selection). */
-function factConditions(inp: PanelCellInput, fc: FactCard, ctx: Ctx, words: CondWords, o: { onlyTo?: string; towardRows?: PanelCondition[] }): PanelConditions | undefined {
+function factConditions(
+  inp: PanelCellInput,
+  fc: FactCard,
+  ctx: Ctx,
+  words: CondWords,
+  o: {
+    onlyTo?: string;
+    towardRows?: PanelCondition[];
+    /** "Of these answers, you are the pick" on rows of 5+ answers (default on: the pick cards). */
+    pickKind?: boolean;
+    /** The toward rows count only the answers in this slice (a lost-with-an-exception card: the answers that pick the
+     * rival); their base stays every answer of the card. */
+    towardOnly?: string;
+    /** The toward rows' examples carry the rival they pick. */
+    pickedStamp?: string;
+    /** The grouping the rows read (default: the run's themes, else its groups). */
+    flavor?: CondFlavor;
+    /** Both-ways pairs ("Also said for ..." from the run's one grouping): on by default; off where the card never
+     * drew them (am24: the pick contests only - Habit is not one). */
+    pairs?: boolean;
+  }
+): PanelConditions | undefined {
   const { h } = ctx;
   const { book, sel, set, themed } = fc.F;
   const scope = fc.scope;
   const rows = book.rows(scope);
   if (!rows.some((f) => f.conds !== null)) return undefined;
-  const flavor = themed ? "themed" : "group";
-  const pairs = sel.selection("cond_pairs", "ai", scope).members as unknown as { key: string; toward: string[]; away: string[] }[];
+  const flavor: CondFlavor = o.flavor ?? (themed ? "themed" : "group");
+  const grouping = flavor === "themed" ? "theme" : flavor === "tierwide" ? "tier" : "group";
+  const pickKind = o.pickKind ?? true;
+  // The both-sides pairs are conditions stated for both brands-sides; the tier rows (premium / basic) have none.
+  const pairs = flavor === "tierwide" || o.pairs === false ? [] : (sel.selection("cond_pairs", "ai", scope).members as unknown as { key: string; toward: string[]; away: string[] }[]);
   /** The theme a pair's half falls in (most of its statements; ties lowest) - a themed row carries the pair when the row
    * is that theme. */
   const halfTheme = (units: string[]) => {
@@ -3300,16 +3335,17 @@ function factConditions(inp: PanelCellInput, fc: FactCard, ctx: Ctx, words: Cond
   const stOf = (f: AnswerFact, units: Set<string>, side: "toward" | "away") => {
     const st = (f.conds ?? []).filter((c) => units.has(c.unit));
     const keys = new Set(st.flatMap((c) => c.keys));
-    const otherSide = (f.conds ?? []).filter((c) => c.side !== side && c.grouping === (themed ? "theme" : "group"));
+    const otherSide = (f.conds ?? []).filter((c) => c.side !== side && c.grouping === grouping);
     const mixed = otherSide.some((c) => c.keys.some((k) => keys.has(k))) ? 2 : otherSide.length ? 1 : 0;
     return { said: st[0]?.said ?? "", cards: [...new Set(st.flatMap((c) => c.cards))], cardTo: st.flatMap((c) => c.cardTo), toKeys: [...new Set(st.flatMap((c) => c.toKeys))], mixed };
   };
   const build = (side: "toward" | "away"): { rows: PanelCondition[]; selection: string } => {
-    const s = sel.selection("conditions_shown", "ai", scope, { side, flavor, ...(o.onlyTo && side === "away" ? { to: o.onlyTo } : {}) });
+    const only = side === "toward" ? o.towardOnly : undefined;
+    const s = sel.selection("conditions_shown", "ai", scope, { side, flavor, ...(o.onlyTo && side === "away" ? { to: o.onlyTo } : {}), ...(only ? { towardOnly: only } : {}) });
     const out: PanelCondition[] = [];
     for (const m of s.members as CondRow[]) {
       const units = new Set(m.units);
-      const sub = condSub("ai", m.units, side === "away" ? o.onlyTo : undefined);
+      const sub = condSub("ai", m.units, side === "away" ? o.onlyTo : undefined, only);
       const f = book.fact("cond_share", sub, scope);
       const cands = book.answers("cond_share", sub, scope).hit.map((a) => {
         const st = stOf(a, units, side);
@@ -3319,8 +3355,9 @@ function factConditions(inp: PanelCellInput, fc: FactCard, ctx: Ctx, words: Cond
       });
       // Toward rows go first and record their examples; an away row never reuses one (am23). An away row whose every
       // answer is already shown toward is not drawn.
-      const refs = pickRefs(cands, m.label, PANEL_REFS, side === "away" ? skip : undefined);
+      let refs = pickRefs(cands, m.label, PANEL_REFS, side === "away" ? skip : undefined);
       if (!refs.length) continue;
+      if (side === "toward" && o.pickedStamp) refs = refs.map((r) => ({ ...r, picked: o.pickedStamp }));
       if (side === "toward") for (const r of refs) skip.add(r.responseId);
       const share = num(f.k, f.n, "answers", refs);
       share.value = f.text;
@@ -3346,8 +3383,8 @@ function factConditions(inp: PanelCellInput, fc: FactCard, ctx: Ctx, words: Cond
         });
         if (to.length) row.to = to;
       }
-      if (f.k >= PICKED_MIN) {
-        const ysub = condSub("ai", m.units, side === "away" ? o.onlyTo : undefined);
+      if (pickKind && f.k >= PICKED_MIN) {
+        const ysub = condSub("ai", m.units, side === "away" ? o.onlyTo : undefined, only);
         const y = book.fact("cond_you_picked", ysub, scope);
         const hits = book.answers("cond_you_picked", ysub, scope).hit;
         const n = num(y.k, y.n, "answers", pickRefs(hits.map((a) => ({ id: a.responseId, find: stOf(a, units, side).said, model: fc.rowById.get(a.responseId)?.model ?? a.engine.id })), m.label, PANEL_REFS));
@@ -3358,7 +3395,8 @@ function factConditions(inp: PanelCellInput, fc: FactCard, ctx: Ctx, words: Cond
       // The same condition stated for the other side, under the run's one grouping (a twin row below overrides it).
       const ou = pairOther(side, m.units);
       if (ou.length) {
-        const osub = condSub("ai", ou);
+        // The other side's own share: an away row's other side is the toward rows, under their own filter.
+        const osub = condSub("ai", ou, undefined, side === "away" ? o.towardOnly : undefined);
         const a = book.fact("cond_share", osub, scope);
         if (a.k) {
           const n = num(a.k, a.n, "answers", pickRefs(book.answers("cond_share", osub, scope).hit.map((x) => ({ id: x.responseId, find: (x.conds ?? []).find((c) => ou.includes(c.unit))?.said ?? "", model: fc.rowById.get(x.responseId)?.model ?? x.engine.id })), m.label, PANEL_REFS));
@@ -3597,6 +3635,13 @@ function factStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
   const youRec = book.fact("recommended", "you", scope);
   const youConv = book.fact("converts", "you", scope);
   const outcomeLabels = OUTCOME_LABELS(h.noun);
+  // How a sentence names the card's usual (What's popular and Premium vs basic: What to buy, all buyers).
+  const uw =
+    inp.kind === "switching"
+      ? { than: "across all rivals' customers", col: "All rivals' customers" }
+      : inp.kind === "popular" || inp.kind === "premium"
+        ? { than: `when buyers ask ${ROW_NAME.open.toLowerCase()}`, col: ROW_NAME.open }
+        : { than: "across all buyers", col: "All buyers" };
   const details: Partial<Record<PanelStepKey, PanelStepDetail>> = {};
   const usualN = fc.usual ? book.rows(fc.usual).length : 0;
   const avg = !!p.avgComp && fc.members.length > 0;
@@ -3620,15 +3665,15 @@ function factStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
       }
     : fc.usual && usualN >= PANEL_MIN
       ? {
-          than: inp.kind === "switching" ? "across all rivals' customers" : "across all buyers",
-          thanDo: `they do ${inp.kind === "switching" ? "across all rivals' customers" : "across all buyers"}`,
-          columns: { you: "Here", rival: inp.kind === "switching" ? "All rivals' customers" : "All buyers", rivalIsUsual: true as const },
+          than: uw.than,
+          thanDo: `they do ${uw.than}`,
+          columns: { you: "Here", rival: uw.col, rivalIsUsual: true as const },
           named: kn(book.fact("named", "you", fc.usual)),
           rec: kn(book.fact("recommended", "you", fc.usual)),
           conv: kn(book.fact("converts", "you", fc.usual)),
           recN: book.fact("recommended", "you", fc.usual).k,
           nnr: { nnr: () => fx(fc, "named_not_recommended", "you", fc.usual!, "answers", surf(T)), neg: () => fx(fc, "negative_when_named_not_recommended", "you", fc.usual!, "answers named but not recommended", surf(T)), nnrK: book.fact("named_not_recommended", "you", fc.usual).k },
-          outcome: () => ({ ...factOutcome(fc, ctx, T, inp.kind === "switching" ? "All rivals' customers" : "All buyers", false, fc.usual!), you: true as const, usual: true as const }),
+          outcome: () => ({ ...factOutcome(fc, ctx, T, uw.col, false, fc.usual!), you: true as const, usual: true as const }),
         }
       : null;
   if (side) {
@@ -3637,7 +3682,7 @@ function factStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
       const r = namedRows(side.nnr);
       details.named = { heading: namedHead(dir, side.than), body: namedLine(dir, side.than, behindPicks), ...(r ? { columns: side.columns, rows: r } : {}) };
     }
-    if (step("recommended")) {
+    if (step("recommended") && inp.kind !== "learning") {
       const dir = dirOf(kn(youRec), side.rec);
       const list = takersList();
       details.recommended = {
@@ -3726,6 +3771,659 @@ function factByCell(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
       };
     });
   }
+}
+
+/* ------------- fact layer, cards step 2: head-to-heads, What's popular, Premium vs basic, Habit ------------- */
+
+/**
+ * Four more card kinds read the fact layer (FACT_LAYER_DESIGN_2026-11-17.md step 4, second slice): every head-to-head
+ * card (a named rival, a class, all your named rivals - the lost-with-an-exception step included), What's popular,
+ * Premium vs basic and Habit, and the rival cards inside them. Every drawn number is a fact (measure | subject | scope,
+ * or the average competitor of a selection), every list a selection; this builder counts nothing itself. Rulings
+ * that land here: 2, 6, 8 (a pick outside of analysis is its own bucket), 12 (a pick outside the category is its own
+ * share, never "no single pick" or "lists several without choosing"), 13 (a premium answer with no stance is its own
+ * share, never "balanced"), 14 (one condition grouping - the Premium vs basic rows group its rules on the run's
+ * condition keys), 15 (one product grouping), and the ratified competitor shape on What's popular and Premium vs basic
+ * (ranked by recommendations - the card's own measure; head-to-head rivals tagged; class brands out; an Other row with
+ * no bar, since recommendation shares do not add to 100%; the average competitor = every listed rival pooled).
+ */
+
+/** A card's fact card (its scope, its usual scope, the selection behind its bars). */
+function mkFactCard(inp: PanelCellInput, ctx: Ctx, scope: Scope, usual: Scope | undefined, comp: AnySelection, members: SelMember[]): FactCard {
+  const PF = ctx.h.facts!;
+  const fc: FactCard = { F: PF, scope, usual, comp, members, behind: false, avg: {}, rowById: rowsById(ctx), n: PF.book.rows(scope).length };
+  FACT_CARD.set(inp, fc);
+  return fc;
+}
+
+/** A head-to-head card's scope: one named rival or one class (the question's own rival), or every named rival. */
+function h2hScope(inp: PanelCellInput, F: PickFacts): Scope {
+  if (inp.pooled) return { types: ["comparison_entity"] };
+  const f0 = F.set.facts.find((f) => f.responseId === inp.rows[0]?.code.response_id);
+  const type: QuestionType = f0?.type === "comparison_class" ? "comparison_class" : "comparison_entity";
+  return { types: [type], rival: f0?.rival?.key ?? "__none__" };
+}
+
+/** A split-bar segment that is a fact. */
+function segFx(fc: FactCard, key: string, label: string, tone: PanelSegment["tone"], m: string, s: string, scope: Scope, unit: string, find: (r: PoolRow) => string): PanelSegment {
+  return { key, label, tone, num: fx(fc, m, s, scope, unit, find) };
+}
+
+/** A section of an explanation: rows of 3+ answers (sorted by their share unless kept in order); a sentence when none
+ * clears the floor but some answers exist; nothing when no answer does. */
+function factSec(title: string, sub: string | undefined, tone: PanelTone, items: { label: string; num: PanelNum }[], few: string, keepOrder = false): PanelDetailSection | null {
+  const rate = (x: PanelNum) => {
+    const kn = knOf(x)!;
+    return kn.n ? kn.k / kn.n : 0;
+  };
+  const ok = items.filter((x) => (knOf(x.num)?.k ?? 0) >= ROW_MIN);
+  if (!keepOrder) ok.sort((a, b) => rate(b.num) - rate(a.num) || a.label.localeCompare(b.label));
+  if (!ok.length && !items.some((x) => (knOf(x.num)?.k ?? 0) > 0)) return null;
+  return { title, ...(sub !== undefined ? { sub } : {}), tone, rows: ok.map((x) => ({ label: x.label, num: x.num })), ...(ok.length ? {} : { note: join(few) }) };
+}
+
+/** The head-to-head card. */
+function factH2hPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
+  const { h } = ctx;
+  const PF = h.facts!;
+  const { sel, set, themed } = PF;
+  const scope = h2hScope(inp, PF);
+  const usualInp = usualOf(inp, ctx.inputs);
+  const rivalsSel = sel.selection("h2h_rivals", "you", scope);
+  const fc = mkFactCard(inp, ctx, scope, usualInp ? { types: ["comparison_entity"] } : undefined, rivalsSel, []);
+  const rival = inp.pooled ? "your named rivals" : inp.rivalName ?? inp.label;
+  const pf = (r: PoolRow) => h.quoteOf(r) || r.code.top_pick || h.brand;
+  const UNIT2 = "answers that pick one of the two";
+  const decided = fx(fc, "h2h_decided", "ai", scope, "answers", pf);
+  const d = knOf(decided)!.k;
+  const wonN = fx(fc, "h2h_two_way", "you", scope, UNIT2, pf);
+  const lostN = fx(fc, "h2h_two_way", "rival", scope, UNIT2, pf);
+  const wonK = knOf(wonN)!.k;
+  const lostK = knOf(lostN)!.k;
+  // The all-rivals card: each rival's share of the answers that pick one of the two (the switch's bars).
+  const byRival = inp.pooled ? (rivalsSel.members as SelMember[]).map((m) => ({ name: m.name, num: fx(fc, "h2h_two_way", m.key, scope, UNIT2, pf) })) : [];
+  const vsName = inp.pooled ? "Your named rivals" : rival;
+  const steps: PanelStep[] = [
+    { key: "decided", label: "The AI picks one of the two", here: decided, hereLabel: inp.pooled ? "All your head-to-heads" : "This matchup", usualLabel: "All your head-to-heads", compHereLabel: "All your head-to-heads" },
+    ...(d > 0
+      ? [
+          {
+            key: "won" as const,
+            label: "When it picks, who it picks",
+            here: wonN,
+            vs: { name: vsName, num: lostN },
+            rivals: byRival.length >= 2 ? byRival : [{ name: vsName, num: lostN }],
+            ...(inp.pooled && byRival.length >= 2 ? { note: join("Each share is of all the head-to-head answers that pick one of the two; each rival is asked about only in its own matchup, so yours spans every matchup.") } : {}),
+          },
+        ]
+      : []),
+  ];
+  // Lost with an exception (the Map's verdict decides the card has the step): of the answers that pick the rival, how
+  // many still state a condition for you (a condition row in the card's grouping, the default clause left out).
+  const exc = inp.exception;
+  const stated = `cond:toward:${themed ? "theme" : "group"}`;
+  if (exc && !inp.pooled && lostK) {
+    const at: Scope = { ...scope, when: "pick:rival" };
+    const unit = `answers that pick ${rival}`;
+    const vf = (r: PoolRow) => verdictFind(r, h);
+    steps.push({
+      key: "exception",
+      label: EXCEPTION_TEXT.label(rival),
+      tagUsual: EXCEPTION_TEXT.callout,
+      tagRank: EXCEPTION_TEXT.callout,
+      tagUsualTone: "good",
+      tagRankTone: "good",
+      segments: [segFx(fc, "still", EXCEPTION_TEXT.still, "you", "slice_share", `ai/slice:${stated}`, at, unit, vf), segFx(fc, "none", EXCEPTION_TEXT.none, "neutral", "slice_share", `ai/slice:!${stated}`, at, unit, vf)],
+    });
+  }
+  let claim: PanelText;
+  if (d === 0) claim = join(`Asked to choose between you and ${rival}, the AI picks neither in every answer.`);
+  else if (inp.pooled) claim = join("Asked to choose between you and one of your named rivals, the AI picks you in ", N(wonN), " of the answers that pick one of you.");
+  else if (wonK === 0 || lostK === 0) claim = join(`Asked to choose between you and ${rival}, the AI picks ${wonK === 0 ? rival : "you"} every time it picks one of you.`);
+  else {
+    const leadYou = wonK >= lostK;
+    claim = join(`Asked to choose between you and ${rival}, the AI picks ${leadYou ? "you" : rival} in `, N(leadYou ? wonN : lostN), " of the answers that pick one of you.");
+  }
+  const withExc = !!(exc && inp.rivalKey);
+  const conditions = factConditions(
+    inp,
+    fc,
+    ctx,
+    {
+      title: inp.pooled ? "When the AI says to choose a rival, and when you" : `When the AI says to choose ${rival}, and when you`,
+      sub: exc
+        ? `Share of these answers that say "choose this ${h.noun} if the buyer...". Your rows come from answers that pick ${rival}: what it concedes to you while you lose.`
+        : `Share of these answers that say "choose this ${h.noun} if the buyer...".`,
+      towardTitle: "Choose you if",
+      awayTitle: inp.pooled ? "Choose the rival if" : `Choose ${rival} if`,
+      alsoToward: inp.pooled ? "Also said for the rival" : `Also said for ${rival}`,
+      alsoAway: "Also said for you",
+      toWord: "To",
+      ...(exc ? { towardScope: "rival_picked" as const } : {}),
+    },
+    { pickKind: true, ...(withExc ? { towardOnly: "pick:rival", pickedStamp: exc!.rival } : {}) }
+  );
+  let lead: PanelText | undefined;
+  const t = conditions?.toward ?? [];
+  const a = conditions?.away ?? [];
+  if (exc && t.length) lead = attachedLead("choosing you", t.slice(0, 2), "answers", `Even while picking ${rival}, `);
+  else if (a.length || t.length)
+    lead = join(a.length ? attachedLead(inp.pooled ? "choosing the rival" : `choosing ${rival}`, [a[0]], "answers") : null, a.length && t.length ? " " : null, t.length ? attachedLead("choosing you", [t[0]], "answers") : null);
+  // Which of the rival's products it picks, out of every pick of the rival (ruling 15).
+  const lines: PanelLine[] = [];
+  if (!inp.pooled && lostK && set.ladder && scope.rival) {
+    const rk = scope.rival;
+    const prods = sel.selection("product_picks", "you", scope, { brand: rk, top: 2 });
+    const items = (prods.members as SelMember[]).map((x) => ({ name: x.key === "~none" ? noneName(ctx) : x.name, num: fx(fc, "pick_product_share", `ai/slice:pickprod:${x.key === "~none" ? "none" : x.key}`, { ...scope, when: `pick:${rk}` }, `picks of ${rival}`, (r) => r.code.top_pick || x.name) }));
+    if (namesAProduct(items)) lines.push({ label: `Which ${rival} ${h.plural} it picks`, value: splitLine(items), selection: prods.id });
+  }
+  const weighs = factWeighs(inp, fc, ctx, [{ say: "come up here", unit: "answers", tone: "neutral" }], WEIGHS_SUB_ALL);
+  return {
+    kind: "h2h",
+    claim,
+    ...(lead ? { lead } : {}),
+    ...(usualInp ? { usualCellId: usualInp.id, usualKey: "You, across all your head-to-heads" } : {}),
+    hereKey: "You",
+    stackLabel: "Where it is decided",
+    steps,
+    ...(byRival.length >= 2 ? { compare: true as const, competitorOrder: byRival.map((x) => x.name), competitorSelection: rivalsSel.id } : {}),
+    ...(conditions ? { conditions } : {}),
+    lines,
+    ...(weighs ? { weighs } : {}),
+  };
+}
+
+/** The head-to-head card's step explanations: when it picks neither (another brand in analysis, a pick outside the
+ * category - ruling 12, no single pick), the exception's conditions, who it picks. */
+function factH2hStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
+  const fc = FACT_CARD.get(inp)!;
+  if (fc.n < DETAIL_MIN) return;
+  const { h } = ctx;
+  const { sel, themed } = fc.F;
+  const scope = fc.scope;
+  const R = inp.pooled ? "your named rivals" : inp.rivalName ?? inp.label;
+  const details: Partial<Record<PanelStepKey, PanelStepDetail>> = {};
+  const dec = p.steps.find((s) => s.key === "decided" && !!s.here);
+  const won = p.steps.find((s) => s.key === "won");
+  if (dec?.here) {
+    const top = (r: PoolRow) => r.code.top_pick || h.brand;
+    const restRows = [
+      { label: `Picks another ${h.noun}`, num: fx(fc, "slice_share", "ai/slice:pick:other&!pick:rival", scope, "answers", top) },
+      { label: "Picks a brand outside of analysis", num: fx(fc, "slice_share", "ai/slice:pick:outside_analysis", scope, "answers", top) },
+      { label: "Picks something outside the category", num: fx(fc, "slice_share", "ai/slice:pick:outside_category", scope, "answers", top) },
+      { label: "No single pick", num: fx(fc, "h2h_no_pick", "ai", scope, "answers", (r) => verdictFind(r, h)) },
+    ].filter((x) => (knOf(x.num)?.k ?? 0) >= 3);
+    details.decided = {
+      heading: dec.here.pct >= 50 ? "The AI mostly picks one of the two" : "The AI mostly declines to pick one of the two",
+      body: decidedLine(dec.here.pct >= 50),
+      ...(restRows.length ? { list: { title: "When it picks neither of the two", rows: restRows } } : {}),
+    };
+  }
+  // The exception names the buyers still sent to you, as shares of the answers that pick the rival - the card's own
+  // toward condition rows (one selection).
+  const ex = p.steps.find((s) => s.key === "exception");
+  if (ex) {
+    const at: Scope = { ...scope, when: "pick:rival" };
+    const rowsSel = sel.selection("conditions_shown", "ai", scope, { side: "toward", flavor: themed ? "themed" : "group", towardOnly: "pick:rival" });
+    const items = (rowsSel.members as CondRow[]).slice(0, 4).map((m) => ({ label: m.label, num: fx(fc, "cond_share", condSub("ai", m.units), at, `answers that pick ${R}`, () => m.raw ?? m.label) }));
+    const who = factSec(EXCEPTION_TEXT.who.title, EXCEPTION_TEXT.who.sub(R), "good", items, EXCEPTION_TEXT.who.few);
+    details.exception = { heading: EXCEPTION_TEXT.heading(R), body: join(EXCEPTION_TEXT.body(R)), callout: EXCEPTION_TEXT.callout, ...(who ? { sections: [who] } : {}) };
+  }
+  if (won?.here && won.vs && (knOf(p.steps.find((s) => s.key === "decided")!.here!)?.k ?? 0) >= DETAIL_MIN) {
+    const w = won.here.pct;
+    details.won = {
+      heading: w >= 60 ? "When it picks one of the two, it mostly picks you" : w <= 40 ? `When it picks one of the two, it mostly picks ${inp.pooled ? "the rival" : R}` : "When it picks one of the two, it is close",
+      body: wonLine(w >= 60 ? "you" : w <= 40 ? "rival" : "close"),
+    };
+  }
+  if (Object.keys(details).length) {
+    p.details = details;
+    if (p.compare) p.detailsComp = { ...details };
+  }
+}
+
+/** What's popular (and the funnel under Premium vs basic): named, recommended, names one pick - against What to buy,
+ * all buyers (ruling 7) and the competitor group ranked by recommendations. */
+function factPopularPanel(inp: PanelCellInput, ctx: Ctx, type: QuestionType = "social_validation"): PositionPanel {
+  const { h } = ctx;
+  const PF = h.facts!;
+  const { book, sel, set } = PF;
+  const T = set.target.key;
+  const scope: Scope = { types: [type] };
+  const hasU = !!ctx.inputs.get("chooses:open:all");
+  const uScope: Scope | undefined = hasU ? WHAT_TO_BUY_ALL : undefined;
+  const uName = ROW_NAME.open.toLowerCase();
+  const comp = sel.selection("competitors", "you", scope, { rankBy: "recommended" });
+  const members = comp.members as SelMember[];
+  const fc = mkFactCard(inp, ctx, scope, uScope, comp, members);
+  const leader = sel.selection("leader", "you", scope).members[0] as SelMember | undefined;
+  fc.behind = !!leader && leader.count > book.fact("share_of_picks", "you", scope).k;
+  const all = fc.n;
+  const pf = (name: string) => (r: PoolRow) => h.quoteOf(r) || r.code.top_pick || name;
+  const surfF = (k: string, rec: boolean, name: string) => (r: PoolRow) => surfOf(r, k, h, rec) ?? r.code.top_pick ?? name;
+  const named = fx(fc, "named", "you", scope, "answers", surfF(T, false, h.brand));
+  const rec = fx(fc, "recommended", "you", scope, "answers", surfF(T, true, h.brand));
+  const uNamed = uScope ? fx(fc, "named", "you", uScope, "answers", surfF(T, false, h.brand)) : undefined;
+  const uRec = uScope ? fx(fc, "recommended", "you", uScope, "answers", surfF(T, true, h.brand)) : undefined;
+  const commits = fx(fc, "commit_rate", "ai", scope, "answers", pf(h.brand));
+  const uCommits = uScope ? fx(fc, "commit_rate", "ai", uScope, "answers", pf(h.brand)) : undefined;
+  const every = knOf(named)!.k === all && all > 0;
+  const claim = join(
+    whenAsks(inp, "buyer", `which ${h.plural} people choose most`),
+    "the AI names you in ",
+    every ? F("every answer", named) : join(N(named), " of answers"),
+    knOf(rec)!.k ? join(", and recommends you in ", N(rec), ".") : ", and never recommends you."
+  );
+  const conditions = factConditions(
+    inp,
+    fc,
+    ctx,
+    {
+      title: `When the AI says to choose you, and when another ${h.noun}`,
+      sub: `Share of these answers that say "choose this ${h.noun} if the buyer...". The grey bar shows how often it comes up where the AI says it both ways.`,
+      subComp: `Share of these answers that say "choose this ${h.noun} if the buyer...". The names after each row are the ones it says to choose instead.`,
+      towardTitle: "Choose you if",
+      awayTitle: `Choose another ${h.noun} if`,
+      alsoToward: `Also said for another ${h.noun}`,
+      alsoAway: "Also said for you",
+      toWord: "To",
+    },
+    { pickKind: false }
+  );
+  const t = conditions?.toward ?? [];
+  const a = conditions?.away ?? [];
+  const lead = t.length || a.length ? join(t.length ? attachedLead("choosing you", [t[0]]) : null, t.length && a.length ? " " : null, a.length ? attachedLead(`choosing another ${h.noun}`, [a[0]]) : null) : undefined;
+  // The competitor group's steps and its Other row (no bar on named / recommended).
+  const other = comp.extras.other!;
+  const memberNum = (m: string, rec2: boolean) => (x: SelMember) => ({ name: x.name, num: fx(fc, m, subj(fc, x.key), scope, "answers", surfF(x.key, rec2, x.name)) });
+  const otherRows = (m: string, rec2: boolean): PanelOther | undefined => {
+    if (!other.shown.length && !other.rest) return undefined;
+    const rows = other.shown.map((x) => ({ name: x.name, num: fx(fc, m, subj(fc, x.key), scope, "answers", surfF(x.key, rec2, x.name)) }));
+    rows.sort((p, q) => knOf(q.num)!.k - knOf(p.num)!.k || p.name.localeCompare(q.name));
+    return { rows, ...(other.rest ? { rest: moreBrands(other.rest) } : {}), selection: comp.id };
+  };
+  const steps: PanelStep[] = [
+    { key: "named", label: "Named", here: named, ...(uNamed ? { usual: uNamed } : {}), ...(members.length ? { rivals: members.map(memberNum("named", false)), ...optOther(otherRows("named", false)) } : {}) },
+    { key: "recommended", label: "Recommended", here: rec, ...(uRec ? { usual: uRec } : {}), ...(members.length ? { rivals: members.map(memberNum("recommended", true)), ...optOther(otherRows("recommended", true)) } : {}) },
+    { key: "commits", label: `The answer names one ${h.noun} as the pick`, here: commits, ...(uCommits ? { usual: uCommits } : {}), compHereLabel: `Any ${h.noun}`, ...(members.length ? { tagRank: "Same for every brand" } : {}) },
+  ];
+  if (members.length) {
+    fc.avg.named = fxAvg(fc, "named", scope, "answers, the competitors shown added up", (k) => (r) => surfOf(r, k, h, false) ?? r.code.top_pick ?? "");
+    fc.avg.recommended = fxAvg(fc, "recommended", scope, "answers, the competitors shown added up", (k) => (r) => surfOf(r, k, h, true) ?? r.code.top_pick ?? "");
+  }
+  // Tables: your products named (the run's one product grouping), and what the answer weighs - this question beside
+  // What to buy, all buyers.
+  const tables: PanelTable[] = [];
+  const cols = uScope ? ["This question", `${upperFirst(uName)}, all buyers`] : ["This question"];
+  if (set.ladder) {
+    const at: Scope = { ...scope, when: "named:you" };
+    const ps = sel.selection("product_names", "you", at, { brand: T, top: 4 });
+    const prods = (ps.members as SelMember[]).filter((x) => x.count >= ROW_MIN);
+    if (prods.length)
+      tables.push({
+        title: `Which of your ${h.plural} it names`,
+        sub: "Share of the answers that name you.",
+        columns: cols,
+        style: "compare",
+        rows: prods.map((x) => ({
+          label: x.name,
+          cells: [fx(fc, "slice_share", `ai/slice:nameprod:${x.key}`, at, "answers that name you", () => x.name), ...(uScope ? [fx(fc, "slice_share", `ai/slice:nameprod:${x.key}`, { ...uScope, when: "named:you" }, "answers that name you", () => x.name)] : [])],
+        })),
+        selection: ps.id,
+      });
+  }
+  const ws = sel.selection("weighs_shown", "ai", scope, { sides: [{}], top: 4 });
+  const codes = (ws.members as WeighsColumn[])[0]?.codes ?? [];
+  if (codes.length)
+    tables.push({
+      title: "What the answer weighs",
+      sub: "Share of the answers that raise each argument.",
+      columns: cols,
+      style: "compare",
+      rows: codes.map(({ code }) => ({
+        label: clabel(code, h),
+        cells: [fx(fc, "argues", `ai/arg:${code}`, scope, "answers", () => code), ...(uScope ? [fx(fc, "argues", `ai/arg:${code}`, uScope, "answers", () => code)] : [])],
+      })),
+      selection: ws.id,
+    });
+  // The rival cards: the full card for a brand among those taking picks here, else the smaller one.
+  const takers = new Set((sel.selection("takers", "you", scope).members as SelMember[]).map((m) => m.key));
+  const converts = fx(fc, "converts", "you", scope, "recommending answers", pf(h.brand));
+  const rivals = members.map((m) => (takers.has(m.key) ? factRival(inp, fc, ctx, m, { named, recommended: rec, converts }, conditions) : factRivalSmall(inp, fc, ctx, m, "Recommended", { measure: "recommended" })));
+  const competitors: PanelBlock | undefined = members.length
+    ? {
+        title: "Which brands it recommends",
+        sub: "Share of these answers that recommend the brand. Open a rival to see how it gets them.",
+        selection: comp.id,
+        rows: [...members.map((x) => ({ name: x.name, num: fx(fc, "recommended", subj(fc, x.key), scope, "answers", surfF(x.key, true, x.name)), open: true as const, ...(x.headToHead ? { tag: "head-to-head" } : {}) })), { name: h.brand, you: true as const, num: rec }].sort(
+          (x, y) => knOf(y.num)!.k - knOf(x.num)!.k || x.name.localeCompare(y.name)
+        ),
+        ...(otherRows("recommended", true) ? { other: otherRows("recommended", true)! } : {}),
+      }
+    : undefined;
+  return {
+    kind: "popular",
+    claim,
+    ...(lead && lead.length ? { lead } : {}),
+    hereKey: "This question",
+    ...(uScope ? { usualKey: `${upperFirst(uName)}, all buyers` } : {}),
+    stackLabel: "How the answer goes",
+    steps,
+    ...(members.length ? { compare: true as const, competitorOrder: members.map((x) => x.name), competitorSelection: comp.id } : {}),
+    ...(competitors ? { competitors } : {}),
+    ...(conditions ? { conditions } : {}),
+    lines: [],
+    ...(tables.length ? { tables } : {}),
+    ...(rivals.length ? { rivals } : {}),
+  };
+}
+
+/** "The answer names one <noun> as the pick" explains itself (What's popular, Premium vs basic): what the answer does
+ * instead (it depends, lists several, a pick outside of analysis or the category - rulings 8 and 12), who gets the
+ * pick, which AI companies name one. The same in both views. */
+function factCommitsDetail(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
+  const fc = FACT_CARD.get(inp)!;
+  const cm = p.steps.find((s) => s.key === "commits" && !!s.here);
+  if (!cm || fc.n < DETAIL_MIN) return;
+  const { h } = ctx;
+  const { sel } = fc.F;
+  const scope = fc.scope;
+  const all = fc.n;
+  const vf = (r: PoolRow) => verdictFind(r, h);
+  const pf = (name: string) => (r: PoolRow) => h.quoteOf(r) || r.code.top_pick || name;
+  const sl = (expr: string) => fx(fc, "slice_share", `ai/slice:${expr}`, scope, "answers", vf);
+  const depends = sl("pick:none&v:outcome:conditional");
+  const lists = sl("pick:none&!v:outcome:conditional");
+  const instead = factSec(
+    COMMITS_TEXT.instead.title,
+    COMMITS_TEXT.instead.sub,
+    "neutral",
+    [
+      { label: COMMITS_TEXT.depends, num: depends },
+      { label: COMMITS_TEXT.lists, num: lists },
+      { label: COMMITS_TEXT.outsideAnalysis, num: fx(fc, "picks_outside_analysis", "ai", scope, "answers", pf("")) },
+      { label: COMMITS_TEXT.outside, num: fx(fc, "picks_outside_category", "ai", scope, "answers", pf("")) },
+    ],
+    COMMITS_TEXT.instead.few
+  );
+  const pb = sel.selection("pick_brands", "you", scope);
+  const who = factSec(COMMITS_TEXT.who.title, COMMITS_TEXT.who.sub, "neutral", (pb.members as SelMember[]).map((b) => ({ label: b.name, num: fx(fc, "share_of_picks", subj(fc, b.key), scope, "answers that name one pick", pf(b.name)) })), COMMITS_TEXT.who.few);
+  const picked = knOf(cm.here!)!.k;
+  const vs = sel.selection("vendors", "ai", scope, { min: ROW_MIN });
+  const vendor = picked < ROW_MIN ? null : factSec(COMMITS_TEXT.vendor.title, COMMITS_TEXT.vendor.sub, "neutral", (vs.members as SelMember[]).map((v) => ({ label: v.name, num: fx(fc, "commit_rate", "ai", { ...scope, vendor: v.name }, `${v.name} answers`, pf(h.brand)) })), COMMITS_TEXT.vendor.few);
+  const sections = [instead, who, vendor].filter((x): x is PanelDetailSection => !!x);
+  const dk = knOf(depends)!.k;
+  const lk = knOf(lists)!.k;
+  const side: CommitsSide = picked * 2 >= all ? "picks" : dk * 2 >= all ? "depends" : lk * 2 >= all ? "lists" : dk > lk ? "leans_depends" : lk > dk ? "leans_lists" : "split";
+  const d: PanelStepDetail = { ...commitsDetail(side, h.noun), ...(sections.length ? { sections } : {}) };
+  p.details = { ...(p.details ?? {}), commits: d };
+  if (p.compare) p.detailsComp = { ...(p.detailsComp ?? {}), commits: d };
+}
+
+/** Premium vs basic: which end the AI sides with (an answer with no stance its own share - ruling 13), then the funnel
+ * exactly as What's popular builds it; the conditions by the end they choose (ruling 14: the run's condition keys), who
+ * it names at each end, what each side weighs. */
+function factPremiumPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
+  const { h } = ctx;
+  const T9 = PREMIUM_TEXT;
+  const base = factPopularPanel(inp, ctx, "premium_worth");
+  const fc = FACT_CARD.get(inp)!;
+  const { book, sel, set } = fc.F;
+  const scope = fc.scope;
+  const all = fc.n;
+  const T = set.target.key;
+  const vf = (r: PoolRow) => verdictFind(r, h);
+  const prem = fx(fc, "tier_premium", "ai", scope, "answers", vf);
+  const bas = fx(fc, "tier_basic", "ai", scope, "answers", vf);
+  const bal = fx(fc, "tier_balanced", "ai", scope, "answers", vf);
+  const none = book.fact("tier_none", "ai", scope);
+  const tier: PanelStep = {
+    key: "tier",
+    label: T9.stepLabel,
+    segments: [
+      { key: "premium", label: T9.premium, tone: "you", num: prem },
+      { key: "basic", label: T9.basic, tone: "away", num: bas },
+      { key: "balanced", label: T9.balanced, tone: "neutral", num: bal },
+      ...(none.k > 0 ? [{ key: "none", label: T9.none, tone: "neutral" as const, num: fx(fc, "tier_none", "ai", scope, "answers", vf) }] : []),
+    ],
+  };
+  const pk = knOf(prem)!.k;
+  const bk = knOf(bas)!.k;
+  const claim = premiumClaim(h.plural, bas, prem, all > 0 && bk === all, pk === 0, bk === 0);
+  const conditions = factConditions(inp, fc, ctx, { ...T9.conditions, subComp: T9.conditions.sub, toWord: "Names" }, { pickKind: false, flavor: "tierwide" });
+  const t = conditions?.toward ?? [];
+  const a = conditions?.away ?? [];
+  const lead = t.length || a.length ? join(t.length ? attachedLead("choosing premium", [t[0]]) : null, t.length && a.length ? " " : null, a.length ? attachedLead("choosing basic", [a[0]]) : null) : undefined;
+  // Who it names at each end (the ends selection): a brand by its entry, any other name as written.
+  const findIn = (r: PoolRow, choice: string, name: string) => {
+    const ws = (r.code.decision_rules ?? []).filter((d) => d.choice?.trim() === choice && (d.product ?? "").trim()).map((d) => d.product!.trim());
+    const toks = new Set(famTokens(name));
+    return ws.find((w) => famTokens(w).some((x) => toks.has(x))) ?? ws[0] ?? name;
+  };
+  const endCol = (choice: "premium" | "basic", title: string) => {
+    const s = sel.selection("ends", "ai", scope, { choice });
+    const rows = (s.members as SelMember[]).map((m) => {
+      const isYou = m.key === T;
+      const sub = m.key.startsWith("~n:") ? `ai/slice:rulename:${choice}:${m.key.slice(3)}` : `ai/slice:ruleprod:${choice}:${isYou ? "you" : m.key}`;
+      return { name: m.name, num: fx(fc, "slice_share", sub, scope, "answers", (r) => findIn(r, choice, isYou ? h.brand : m.name)), ...(isYou ? { you: true as const } : {}) };
+    });
+    return { col: { title, tone: "neutral" as PanelTone, rows, ...(rows.length ? {} : { note: T9.ends.none(choice) }) }, id: s.id };
+  };
+  const premCol = endCol("premium", T9.ends.premium);
+  const basCol = endCol("basic", T9.ends.basic);
+  const ends: PanelWeighs | undefined = premCol.col.rows.length || basCol.col.rows.length ? { title: T9.ends.title, sub: T9.ends.sub, columns: [premCol.col, basCol.col], selection: `${premCol.id} ; ${basCol.id}` } : undefined;
+  const weighs =
+    factWeighs(inp, fc, ctx, [
+      { title: T9.weighs.premium, say: T9.weighs.sayPremium, tone: "good", slice: "v:tier_stance:premium" },
+      { title: T9.weighs.basic, say: T9.weighs.sayBasic, tone: "bad", slice: "v:tier_stance:basic" },
+    ], WEIGHS_SUB_SIDES) ?? factWeighs(inp, fc, ctx, [{ say: "come up here", unit: "answers", tone: "neutral" }], WEIGHS_SUB_ALL);
+  const out: PositionPanel = { ...base, kind: "premium", claim, steps: [tier, ...base.steps] };
+  delete out.lead;
+  delete out.conditions;
+  delete out.tables;
+  delete out.weighs;
+  delete out.weighsComp;
+  if (lead && lead.length) out.lead = lead;
+  if (conditions) out.conditions = conditions;
+  if (ends) out.ends = ends;
+  if (weighs) out.weighs = weighs;
+  return out;
+}
+
+/** The "which end" step's takeaway and explanation, from facts; it starts selected. */
+function factPremiumFinish(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
+  const { h } = ctx;
+  const T9 = PREMIUM_TEXT;
+  const fc = FACT_CARD.get(inp)!;
+  const { book, sel } = fc.F;
+  const scope = fc.scope;
+  const s = p.steps.find((x) => x.key === "tier");
+  if (!s?.segments) return;
+  const tk = tierTakeaway(segPct(s, "premium"), segPct(s, "basic"), segPct(s, "balanced"));
+  s.tagUsual = tk.tag;
+  s.tagUsualTone = tk.tone;
+  s.tagRank = tk.tag;
+  s.tagRankTone = tk.tone;
+  const all = fc.n || 1;
+  const yp = book.fact("slice_share", "ai/slice:ruleprod:premium:you", scope).k;
+  const yb = book.fact("slice_share", "ai/slice:ruleprod:basic:you", scope).k;
+  const l = leanOf((100 * yp) / all, (100 * yb) / all);
+  const where: TierWhere = yp < ROW_MIN && yb < ROW_MIN ? "neither" : l > 0 ? "premium" : l < 0 ? "basic" : "both";
+  const vs = sel.selection("vendors", "ai", scope, { min: ARGS_MIN });
+  const items = (vs.members as SelMember[]).map((v) => ({ label: v.name, num: fx(fc, "tier_basic", "ai", { ...scope, vendor: v.name }, `${v.name} answers`, (r) => verdictFind(r, h)) }));
+  const sec = items.some((x) => (knOf(x.num)?.k ?? 0) > 0) ? factSec(T9.vendor.title, T9.vendor.sub, "bad", items, T9.vendor.few) : null;
+  const d: PanelStepDetail = { ...tierDetail(tk.tag, where), ...(sec ? { sections: [sec] } : {}) };
+  p.details = { tier: d, ...(p.details ?? {}) };
+  p.focus = "tier";
+  if (p.compare) {
+    p.detailsComp = { tier: d, ...(p.detailsComp ?? {}) };
+    p.focusComp = "tier";
+  }
+}
+
+/** Habit: stick with you, another brand in analysis as the pick (a pick outside of analysis or the category its own
+ * share - rulings 8 and 12), it depends, no pick; how often it suggests another brand; the brands suggested instead. */
+function factHabitPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
+  const { h } = ctx;
+  const T9 = HABIT_TEXT;
+  const PF = h.facts!;
+  const { book, sel, set } = PF;
+  const T = set.target.key;
+  const scope: Scope = { types: ["repertoire"] };
+  const sugg = sel.selection("suggested", "you", scope);
+  const fc = mkFactCard(inp, ctx, scope, undefined, sugg, []);
+  const all = fc.n;
+  const pf = (r: PoolRow) => h.quoteOf(r) || r.code.top_pick || h.brand;
+  const vf = (r: PoolRow) => verdictFind(r, h);
+  const sl = (key: string, label: string, tone: PanelSegment["tone"], expr: string, find: (r: PoolRow) => string) => segFx(fc, key, label, tone, "slice_share", `ai/slice:${expr}`, scope, "answers", find);
+  const has = (expr: string) => book.fact("slice_share", `ai/slice:${expr}`, scope).k > 0;
+  const segs = [
+    sl("stick", T9.stick, "you", "pick:you", pf),
+    sl("other", T9.other, "away", "pick:other", pf),
+    ...(has("pick:outside_analysis") ? [sl("outside_analysis", T9.outsideAnalysis, "neutral", "pick:outside_analysis", pf)] : []),
+    ...(has("pick:outside_category") ? [sl("outside", T9.outside, "neutral", "pick:outside_category", pf)] : []),
+    sl("depends", T9.depends, "neutral", "pick:none&v:outcome:conditional", vf),
+    sl("nopick", T9.nopick, "neutral", "pick:none&!v:outcome:conditional", vf),
+  ];
+  const suggFind = (r: PoolRow) =>
+    (r.code.mentions ?? []).find((m) => m.framing === "recommended" && h.resolve(m.brand).key !== T && h.resolve(m.brand).status === "active")?.brand ??
+    (h.pickOf(r).status === "active" && h.pickOf(r).key !== T ? r.code.top_pick ?? undefined : undefined) ??
+    vf(r);
+  const offers = fx(fc, "slice_share", "ai/slice:rec:anyother", scope, "answers", suggFind);
+  const sk = knOf(segs[0].num)!.k;
+  const ok2 = knOf(segs[1].num)!.k;
+  const claim = habitClaim(segs[0].num, segs[1].num, all > 0 && sk === all, sk === 0, ok2 === 0);
+  const conditions = factConditions(inp, fc, ctx, { ...T9.conditions, subComp: T9.conditions.sub, toWord: "To" }, { pickKind: false, pairs: false });
+  const a = conditions?.away ?? [];
+  const t = conditions?.toward ?? [];
+  const lead =
+    a.length || t.length
+      ? join(t.length ? attachedLead("sticking with you", t.slice(0, 1).map((c) => ({ text: c.text })), "answers") : null, a.length && t.length ? " " : null, a.length ? attachedLead("trying something else", a.slice(0, 1).map((c) => ({ text: c.text })), "answers") : null)
+      : undefined;
+  const members = sugg.members as SelMember[];
+  const recFind = (k: string, name: string) => (r: PoolRow) => surfOf(r, k, h, true) ?? r.code.top_pick ?? name;
+  const block: PanelBlock | undefined = members.length
+    ? { title: T9.suggested.title, sub: T9.suggested.sub, selection: sugg.id, rows: members.map((m) => ({ name: m.name, num: fx(fc, "slice_share", `ai/slice:rec:${m.key}`, scope, "answers", recFind(m.key, m.name)), open: true as const })) }
+    : undefined;
+  const rivals = members.map((m) => factRivalSmall(inp, fc, ctx, m, "Suggested instead", { when: "as something to try", alt: `rec:${m.key}` }));
+  // What each side weighs, led by the cell's top lift each way (the Map's lift list decides the leads and whether
+  // the block is two-sided); too few answers either way, the unsided version.
+  const pos = inp.lifts.filter((l) => l.value > 0).sort((x, y) => y.value - x.value)[0];
+  const neg = inp.lifts.filter((l) => l.value < 0).sort((x, y) => x.value - y.value)[0];
+  const enough = (when: string) => book.rows({ ...scope, when }).filter((f) => f.args !== null).length >= ARGS_MIN;
+  const unsided = () => factWeighs(inp, fc, ctx, [{ say: "come up here", unit: "answers", tone: "neutral" }], WEIGHS_SUB_ALL);
+  const weighs =
+    (!pos && !neg) || (!enough("pick:you") && !enough("pick:other"))
+      ? unsided()
+      : factWeighs(inp, fc, ctx, [
+          { title: T9.weighs.stick, say: T9.weighs.sayStick, tone: "good", slice: "pick:you", ...(pos ? { lead: pos.label } : {}) },
+          { title: T9.weighs.other, say: T9.weighs.sayOther, tone: "bad", slice: "pick:other", ...(neg ? { lead: neg.label } : {}) },
+        ], WEIGHS_SUB_SIDES) ?? unsided();
+  const out: PositionPanel = {
+    kind: "habit",
+    claim,
+    ...(lead && lead.length ? { lead } : {}),
+    stackLabel: "How the answer goes",
+    steps: [
+      { key: "habit", label: T9.stepLabel, segments: segs },
+      { key: "offers", label: T9.offersLabel, here: offers, hereLabel: "All answers" },
+    ],
+    ...(conditions ? { conditions } : {}),
+    lines: [],
+    ...(weighs ? { weighs } : {}),
+    ...(rivals.length ? { rivals } : {}),
+  };
+  if (block) HABIT_SUGGESTED.set(out, block);
+  return out;
+}
+
+/** The Habit card's two steps explained, from facts: which AI companies say try something else, who gets the pick;
+ * the brands suggested instead, who first, your own it suggests (the run's one product grouping). */
+function factHabitStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
+  if (!p.detail) return;
+  const { h } = ctx;
+  const T9 = HABIT_TEXT;
+  const fc = FACT_CARD.get(inp)!;
+  const { book, sel, set } = fc.F;
+  const T = set.target.key;
+  const scope = fc.scope;
+  const all = fc.n;
+  const pf = (r: PoolRow) => h.quoteOf(r) || r.code.top_pick || h.brand;
+  const vs = sel.selection("vendors", "ai", scope, { min: ARGS_MIN });
+  const vendor = factSec(T9.vendor.title, T9.vendor.sub, "bad", (vs.members as SelMember[]).map((v) => ({ label: v.name, num: fx(fc, "slice_share", "ai/slice:pick:other", { ...scope, vendor: v.name }, `${v.name} answers`, pf) })), T9.vendor.few);
+  const inPicks = book.fact("commit_rate", "ai", scope).k;
+  const pb = sel.selection("pick_brands", "you", scope, { youFirst: true, top: 3 });
+  const picks =
+    inPicks >= ARGS_MIN
+      ? factSec(T9.picks.title, T9.picks.sub, "neutral", (pb.members as SelMember[]).map((b) => ({ label: b.key === T ? "You" : b.name, num: fx(fc, "share_of_picks", subj(fc, b.key), scope, "answers that name a pick", b.key === T ? pf : (r: PoolRow) => r.code.top_pick || b.name) })), T9.picks.few, true)
+      : null;
+  const habitSections = [vendor, picks].filter((x): x is PanelDetailSection => !!x);
+  // Of the answers that suggest another brand: who it suggests first.
+  const some = book.fact("slice_share", "ai/slice:rec:anyother", scope).k;
+  const fr = sel.selection("first_rec", "you", scope, { top: 4 });
+  const firstTop = fr.members as SelMember[];
+  const lead = firstTop[0] && some >= ARGS_MIN && firstTop[0].count / some >= 0.3 ? firstTop[0].name : undefined;
+  const own = sel.selection("product_suggested", "you", scope, { brand: T, top: 5 });
+  const shown = HABIT_SUGGESTED.get(p);
+  const offersSections = [
+    shown ? { title: shown.title, sub: shown.sub, tone: "bad" as const, rows: shown.rows.map((r) => ({ label: r.name, num: r.num, ...(r.open ? { open: true as const } : {}) })) } : null,
+    some >= ARGS_MIN ? factSec(T9.first.title, T9.first.sub, "bad", firstTop.map((x) => ({ label: x.name, num: fx(fc, "slice_share", `ai/slice:firstrec:${x.key}`, { ...scope, when: "rec:anyother" }, "answers that suggest another brand", () => x.name) })), T9.first.few) : null,
+    own.members.length ? factSec(T9.own.title(h.plural), T9.own.sub, "good", (own.members as SelMember[]).map((x) => ({ label: x.name, num: fx(fc, "slice_share", `ai/slice:suggprod:${x.key}`, scope, "answers", () => x.name) })), T9.own.few) : null,
+  ].filter((x): x is PanelDetailSection => !!x);
+  const share = all ? some / all : 0;
+  const offersDetail: PanelStepDetail = { ...habitOffersDetail(share >= 0.5 ? "most" : share >= 0.2 ? "some" : "rarely", lead), ...(offersSections.length ? { sections: offersSections } : {}) };
+  p.details = { habit: { ...p.detail, ...(habitSections.length ? { sections: habitSections } : {}) }, offers: offersDetail };
+  p.focus = "habit";
+  delete p.detail;
+  delete p.detailComp;
+}
+
+/** The smaller rival card inside What's popular, Premium vs basic and Habit, from facts: named, and named the card's
+ * way (recommended - ruling 6 - or suggested instead). */
+function factRivalSmall(inp: PanelCellInput, fc: FactCard, ctx: Ctx, m: SelMember, altLabel: string, o: { when?: string; alt?: string; measure?: "recommended" }): PanelRival {
+  const { h } = ctx;
+  const { sel, set } = fc.F;
+  const scope = fc.scope;
+  const T = set.target.key;
+  const R = m.name;
+  const key = m.key;
+  const alt = o.alt ?? `rec:${key}`;
+  const surf = (k: string, rec: boolean, name: string) => (r: PoolRow) => surfOf(r, k, h, rec) ?? r.code.top_pick ?? name;
+  const named = fx(fc, "named", key, scope, "answers", surf(key, false, R));
+  const problem = o.measure === "recommended";
+  const altNum = problem ? fx(fc, "recommended", key, scope, "answers", surf(key, true, R)) : fx(fc, "slice_share", `ai/slice:${alt}`, scope, "answers", surf(key, true, R));
+  const altK = knOf(altNum)!.k;
+  const yNamed = problem ? fx(fc, "named", "you", scope, "answers", surf(T, false, h.brand)) : undefined;
+  const yAlt = problem ? fx(fc, "recommended", "you", scope, "answers", surf(T, true, h.brand)) : undefined;
+  const claim = problem ? join(`The AI recommends ${R} in `, N(altNum), " of these answers.") : join(`The AI names ${R} as the alternative in `, N(altNum), " of these answers.");
+  const steps: PanelStep[] = [
+    yNamed ? { key: "named", label: "Named", here: yNamed, rivals: [{ name: R, num: named }], tagRank: duelTag(knOf(yNamed)!, knOf(named)!, R).tag } : { key: "named", label: "Named", rivals: [{ name: R, num: named }] },
+    { key: "recommended", label: altLabel, ...(yAlt ? { here: yAlt, tagRank: duelTag(knOf(yAlt)!, knOf(altNum)!, R).tag } : {}), rivals: [{ name: R, num: altNum }] },
+  ];
+  // Which of its products it names (the run's one product grouping): per answer, its first written form.
+  const lines: PanelLine[] = [];
+  if (altK >= 5 && set.ladder) {
+    const at: Scope = { ...scope, when: problem ? `rec:${key}` : alt };
+    const ps = sel.selection("product_first", "you", at, { brand: key, top: 2 });
+    const items = (ps.members as SelMember[]).map((x) => ({ name: x.key === "~none" ? noneName(ctx) : x.name, num: fx(fc, "slice_share", `ai/slice:firstprod:${key}:${x.key === "~none" ? "none" : x.key}`, at, "answers naming it", () => x.name) }));
+    if (namesAProduct(items)) lines.push({ label: `Which of its ${h.plural} it names`, value: splitLine(items), selection: ps.id });
+  }
+  const side = problem ? `rec:${key}` : alt;
+  const weighs = o.when
+    ? factWeighs(inp, fc, ctx, [
+        { title: `When it names ${R} ${o.when}`, say: `name ${R}`, tone: "bad", slice: side },
+        { title: "When it does not", say: "leave it out", tone: "neutral", slice: `!${side}` },
+      ], WEIGHS_SUB_NAMING)
+    : factWeighs(inp, fc, ctx, [{ say: "name it", tone: "neutral", slice: side }], WEIGHS_SUB_NAMING);
+  return {
+    name: R,
+    full: false,
+    claim,
+    steps,
+    lines,
+    ...(weighs ? { weighs } : {}),
+    ...(altK < 5 ? { thin: THIN_RIVAL(R, "more than its numbers") } : {}),
+  };
 }
 
 /* ---------------------------- panel 11: a rival ---------------------------- */
@@ -4146,7 +4844,7 @@ function finishPanel(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | 
     // am37: the highlighted step is one that explains itself (a step a reader can select has an explanation).
     if (p.details && p.focus && !p.details[p.focus]) p.focus = p.steps.find((s) => !!p.details![s.key])?.key;
     if (p.detailsComp && p.focusComp && !p.detailsComp[p.focusComp]) p.focusComp = p.steps.find((s) => !!p.detailsComp![s.key])?.key;
-    if (p.kind === "premium") premiumFinish(inp, p, ctx);
+    if (p.kind === "premium") (FACT_CARD.has(inp) ? factPremiumFinish : premiumFinish)(inp, p, ctx);
     if (p.kind === "settled_all") settledAllFinish(inp, p, ctx);
   }
 }
@@ -4480,7 +5178,8 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const tag = p.steps.find((x) => x.key === "habit")?.tagUsual ?? "No clear side";
       const side: HabitSide = /sticks with you|^Leans stick/.test(tag) ? "keeps" : /try something else|^Leans switch/.test(tag) ? "moves" : "leaves";
       p.detail = habitDetail(tag, side);
-      habitStepDetails(inp, p, ctx);
+      if (FACT_CARD.has(inp)) factHabitStepDetails(inp, p, ctx);
+      else habitStepDetails(inp, p, ctx);
       return;
     }
     case "criteria": {
@@ -4950,7 +5649,13 @@ function usualFor(inp: PanelCellInput, u: PanelCellInput | undefined, ctx: Ctx):
 }
 
 function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput | undefined, ctx: Ctx) {
-  if (FACT_CARD.has(inp)) return factStepDetails(inp, p, ctx);
+  if (FACT_CARD.has(inp)) {
+    if (p.kind === "h2h") return factH2hStepDetails(inp, p, ctx);
+    if (p.kind === "habit") return;
+    factStepDetails(inp, p, ctx);
+    if (p.kind === "popular" || p.kind === "premium") factCommitsDetail(inp, p, ctx);
+    return;
+  }
   if (!STEP_DETAIL_KINDS.has(p.kind) || inp.rows.length < DETAIL_MIN) return;
   const { h } = ctx;
   const rows = inp.rows;
@@ -5578,7 +6283,7 @@ function rivalAcrossOne(ctx: Ctx, panels: Map<string, PositionPanel>, rv: { key:
       const fY = funnelOf(so.rows, h.targetKey, h);
       const nR = num(fR.rec.length, so.rows.length, "answers", refsOf(fR.rec, (r) => fR.surf(r, true) ?? r.code.top_pick ?? R));
       const nY = num(fY.rec.length, so.rows.length, "answers", refsOf(fY.rec, (r) => fY.surf(r, true) ?? r.code.top_pick ?? h.brand));
-      const conditions = conditionsOf(so, ctx, rivalWords, { pickKind: true, onlyTo: R, towardRows: panels.get(so.id)?.conditions?.toward });
+      const conditions = conditionsOf(so, ctx, rivalWords, { pickKind: true, onlyTo: R, towardRows: (LEGACY.get(panels) ?? panels).get(so.id)?.conditions?.toward });
       steps.push({
         key: "social",
         label: `${ROW_NAME.social} - recommended`,
@@ -5604,7 +6309,7 @@ function rivalAcrossOne(ctx: Ctx, panels: Map<string, PositionPanel>, rv: { key:
     hhR = num(lostR.length, all, "answers", refsOf(lostR, pf(R)));
     const nY = num(wonY.length, all, "answers", refsOf(wonY, pf(h.brand)));
     const nN = num(rest.length, all, "answers", refsOf(rest, (r) => verdictFind(r, h)));
-    const hp = panels.get(hh.id);
+    const hp = (LEGACY.get(panels) ?? panels).get(hh.id);
     const table = weighTable(lostR, wonY);
     steps.push({
       key: "h2h",

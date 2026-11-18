@@ -589,6 +589,8 @@ export type CommitsSide = "picks" | "depends" | "lists" | "leans_depends" | "lea
 export const COMMITS_TEXT = {
   depends: "Says it depends on the buyer",
   lists: "Lists several without choosing",
+  outside: "Picks something outside the category",
+  outsideAnalysis: "Picks a brand outside of analysis",
   instead: { title: "What the answer does instead", sub: "Share of these answers.", few: "Too few answers take either course to size." },
   who: { title: "Who gets the pick when it names one", sub: "Share of the answers that name one pick.", few: "Too few answers name one pick to size who gets it." },
   vendor: { title: "Which AI companies name one pick", sub: "Share of each company's answers here.", few: "No AI company names one pick often enough to size." },
@@ -792,6 +794,7 @@ export const PREMIUM_TEXT = {
   premium: "premium",
   basic: "basic",
   balanced: "balanced",
+  none: "takes no side",
   conditions: {
     title: "When the AI says premium, and when basic",
     sub: 'Share of these answers that say "choose premium if the buyer..." or "choose basic if the buyer...". The grey bar shows how often it comes up where the AI says it both ways.',
@@ -850,6 +853,8 @@ export const HABIT_TEXT = {
   other: "picks another brand",
   depends: "says it depends",
   nopick: "names no pick",
+  outside: "picks something outside the category",
+  outsideAnalysis: "picks a brand outside of analysis",
   conditions: {
     title: "When the AI says stick with you, and when to try something else",
     sub: 'Share of these answers that say "stick with it if the customer..." or "try something else if...".',

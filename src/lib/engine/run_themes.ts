@@ -29,6 +29,8 @@ export interface RulesShared {
   cellAnswers: Map<string, Map<string, Set<string>>>;
   /** am15: group id -> response id -> its statement (receipts and routes). */
   answerRules: AnswerRules;
+  /** The run's one condition grouping, looked up (a wording -> its condition key; RuleGroup.cond = its hash). */
+  condKeyOf: (condition: string) => string;
 }
 
 /** computeRules with the theme capture, over the engines-only request (the
@@ -38,8 +40,9 @@ export async function rulesForThemes(data: ViewData, eng: ViewRequest): Promise<
   const surfaces = new Map<string, string[]>();
   const cellAnswers = new Map<string, Map<string, Set<string>>>();
   const answerRules: AnswerRules = new Map();
-  const rules = await computeRules(data, eng, { cellSets, surfaces, cellAnswers, answerRules });
-  return { rules, cellSets, surfaces, cellAnswers, answerRules };
+  const capture: Parameters<typeof computeRules>[2] = { cellSets, surfaces, cellAnswers, answerRules };
+  const rules = await computeRules(data, eng, capture);
+  return { rules, cellSets, surfaces, cellAnswers, answerRules, condKeyOf: capture!.condKeyOf ?? ((c: string) => c.trim().toLowerCase()) };
 }
 
 const rulesMemo = computeMemo<RulesShared>("rules_for_themes");

@@ -27,6 +27,14 @@
  *          | pickprod:<product id>  the pick names that product of the run's product grouping (products.ts)
  *          | sentname:<name>        it sends the buyer to that name: a brand in analysis by its name, else as written
  *                                   (case set aside)
+ *          | cond:<side>:<grouping> it states a condition row on that side in that grouping (theme / group), the
+ *                                   default clause ("otherwise") left out
+ *          | nameprod:<product id>  it names that product of the run's product grouping (any written form of its brand)
+ *          | suggprod:<product id>  it suggests that product: a form of its brand framed recommended, or a rule's choice
+ *                                   or product naming it
+ *          | firstprod:<key>:<product id | none>  the brand's first written form names that product (none: no product)
+ *          | rulename:<choice>:<form>,<form>...  a rule choosing <choice> names, as its product, one of these names as
+ *                                   written (no brand in the category; each form URI-encoded, lower case)
  *   <key>   a brand's dictionary entry id, "you" (the tracker) or "rival" (the answer's own named rival)
  *   <bucket> none | in_analysis | outside_analysis | outside_category  (ruling 8)
  *
@@ -44,6 +52,10 @@
  */
 import type { AnswerFact, AnswerFactSet, Bucket } from "./answer_facts";
 import { VERDICT_FIELDS, type VerdictField } from "./answer_facts";
+import { isDefaultCondition } from "../condition_groups";
+import { famTokens } from "../brand_family";
+import { isDescription } from "../value";
+import { pluralNoun, productNoun } from "../panel_text";
 
 const BUCKETS = new Set(["none", "in_analysis", "outside_analysis", "outside_category"]);
 
@@ -99,8 +111,11 @@ function term(t: string, set: AnswerFactSet): Pred {
       const k = keyFn(arg, set);
       return (f) => !!f.price?.rivals.some((b) => b.key === k(f));
     }
-    case "cond":
-      return (f) => !!f.conds?.some((c) => c.side === arg);
+    case "cond": {
+      const [side, grouping] = arg.split(":");
+      if (grouping) return (f) => !!f.conds?.some((c) => c.side === side && c.grouping === grouping && !isDefaultCondition(c.label));
+      return (f) => !!f.conds?.some((c) => c.side === side);
+    }
     case "anybrand":
       return (f) => f.brands.some((b) => b.bucket === "in_analysis");
     case "first": {
@@ -143,6 +158,31 @@ function term(t: string, set: AnswerFactSet): Pred {
       // product test says is not a product).
       if (arg === "none") return (f) => f.pick.state === "in_analysis" && !f.pick.product;
       return (f) => f.pick.state === "in_analysis" && !!f.pick.product && f.pick.product === arg;
+    case "nameprod":
+    case "suggprod": {
+      const pid = arg;
+      return (f) => {
+        const key = set.products?.get(pid)?.key;
+        return !!key && productsOf(f, key, head === "suggprod", set).includes(pid);
+      };
+    }
+    case "firstprod": {
+      const i = arg.lastIndexOf(":");
+      const k = keyFn(arg.slice(0, i), set);
+      const want = arg.slice(i + 1);
+      return (f) => {
+        const key = k(f);
+        if (!key) return false;
+        const pid = firstProductOf(f, key, set);
+        return want === "none" ? pid === null : pid === want;
+      };
+    }
+    case "rulename": {
+      const i = arg.indexOf(":");
+      const choice = arg.slice(0, i);
+      const forms = new Set(arg.slice(i + 1).split(",").map((x) => decodeURIComponent(x)));
+      return (f) => !!f.rules?.some((r) => r.choice.trim() === choice && !!r.product?.trim() && set.resolve(r.product.trim()).status !== "active" && forms.has(looseForm(r.product.trim()).toLowerCase()));
+    }
     case "sentname": {
       const want = arg.trim().toLowerCase();
       return (f) => !!f.sent && (f.sent.brands.some((b) => b.name.toLowerCase() === want) || f.sent.outside.some((w) => w.trim().toLowerCase() === want));
@@ -150,6 +190,110 @@ function term(t: string, set: AnswerFactSet): Pred {
     default:
       throw new Error(`fact layer: slice "${t}": unknown term "${head}"`);
   }
+}
+
+/** A product name as written, cleaned for display: no trade marks, no "from <maker>" tail. */
+export const looseForm = (x: string) => x.replace(/[®™]/g, "").replace(/\s+from\s+.+$/i, "").replace(/\s+/g, " ").trim() || x.trim();
+
+/** The run's products (picked, or named and never picked - nameProductOf) of one brand an answer names (any written form), or suggests (`suggest`: a form framed
+ * recommended, or a rule's choice or product resolving to the brand) - the run's one product grouping (ruling 15). */
+export function productsOf(f: AnswerFact, key: string, suggest: boolean, set: AnswerFactSet): string[] {
+  const of = set.nameProductOf ?? set.productOf;
+  if (!of) return [];
+  const b = f.brands.find((x) => x.key === key);
+  const forms = suggest
+    ? [...(b?.recForms ?? []), ...(f.rules ?? []).flatMap((r) => [r.choice, r.product ?? ""]).map((w) => w.trim()).filter((w) => w && set.resolve(w).key === key)]
+    : b?.forms ?? [];
+  const out: string[] = [];
+  for (const w of forms) {
+    const pid = of(key, w);
+    if (pid && !out.includes(pid)) out.push(pid);
+  }
+  return out;
+}
+
+/** The product the brand's first written form names: its product id; null when that form names no product of the
+ * brand (the bare brand, or a name the product test says is not a product - "no specific product named"); "~unplaced"
+ * when it names a product the run's grouping holds no row for (a product no answer picks: never "no specific"). */
+export function firstProductOf(f: AnswerFact, key: string, set: AnswerFactSet): string | null {
+  const b = f.brands.find((x) => x.key === key);
+  const of = set.nameProductOf ?? set.productOf;
+  if (!b || !of) return null;
+  const pid = of(key, b.written);
+  if (pid) return pid;
+  return set.productTest?.passes(b.written) ? "~unplaced" : null;
+}
+
+/** A description of a tier end ("a cheaper one", "premium ones"): never a named example. */
+const isEndDescription = (clean: string) => isDescription(clean) || /\b(premiums?|top[- ]tier)\b/i.test(clean);
+
+/** Who a set of answers gives as the example of one end (Premium vs basic): per answer, the products its rules choosing
+ * that end name - a brand in the category by its entry id (never a brand outside of analysis, ruling 8), any other name
+ * as written in groups (plural endings one; a name whose words sit inside exactly one larger name joins it), keyed
+ * "~n:<form>,<form>" (each form URI-encoded, lower case). Counted by answers, most first, ties by name. */
+export function endItems(rows: AnswerFact[], choice: string, set: AnswerFactSet, category: string): { key: string; name: string; count: number }[] {
+  const T = set.target.key;
+  const active = new Map<string, { name: string; ids: Set<string> }>();
+  const loose: { form: string; id: string }[] = [];
+  for (const f of rows)
+    for (const r of f.rules ?? []) {
+      if (r.choice.trim() !== choice) continue;
+      const w = (r.product ?? "").trim();
+      if (!w) continue;
+      const res = set.resolve(w);
+      if (res.status === "active") {
+        if (set.bucketOf(res.key) !== "in_analysis") continue;
+        const t = active.get(res.key) ?? { name: res.key === T ? "You" : set.nameOf(res.key), ids: new Set<string>() };
+        t.ids.add(f.responseId);
+        active.set(res.key, t);
+        continue;
+      }
+      const clean = looseForm(w);
+      if (isEndDescription(clean)) continue;
+      loose.push({ form: clean, id: f.responseId });
+    }
+  // Plural endings first, then the name-variant join (the category's own nouns and small words set aside).
+  const STOP = new Set(["the", "from", "by", "of", "a", "an", "and", "with", "for"]);
+  const nouns = new Set([...famTokens(productNoun(category)), ...famTokens(pluralNoun(category))]);
+  type G = { forms: Map<string, number>; ids: Set<string>; toks: Set<string> };
+  const sing = new Map<string, G>();
+  for (const x of loose) {
+    const k = famTokens(x.form).map((w) => (w.length > 3 ? w.replace(/s$/, "") : w)).join(" ") || x.form.toLowerCase();
+    const g = sing.get(k) ?? { forms: new Map<string, number>(), ids: new Set<string>(), toks: new Set<string>() };
+    g.forms.set(x.form, (g.forms.get(x.form) ?? 0) + 1);
+    g.ids.add(x.id);
+    sing.set(k, g);
+  }
+  const by = new Map<string, G>();
+  for (const g of sing.values()) {
+    const top = [...g.forms.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0];
+    const toks = famTokens(top);
+    const kept = toks.filter((t) => !nouns.has(t) && !STOP.has(t));
+    const key = kept.join(" ") || toks.join(" ") || top.toLowerCase();
+    const h = by.get(key) ?? { forms: new Map<string, number>(), ids: new Set<string>(), toks: new Set(kept) };
+    for (const [f, n] of g.forms) h.forms.set(f, (h.forms.get(f) ?? 0) + n);
+    for (const id of g.ids) h.ids.add(id);
+    by.set(key, h);
+  }
+  for (const key of [...by.keys()].sort((a, b) => by.get(a)!.toks.size - by.get(b)!.toks.size)) {
+    const g = by.get(key)!;
+    if (!g.toks.size) continue;
+    const sup = [...by.entries()].filter(([k2, g2]) => k2 !== key && g2.toks.size > g.toks.size && [...g.toks].every((t) => g2.toks.has(t)));
+    if (sup.length !== 1) continue;
+    const into = sup[0][1];
+    for (const [f, n] of g.forms) into.forms.set(f, (into.forms.get(f) ?? 0) + n);
+    for (const id of g.ids) into.ids.add(id);
+    by.delete(key);
+  }
+  const up = (x: string) => (x ? x.charAt(0).toUpperCase() + x.slice(1) : x);
+  return [
+    ...[...active.entries()].map(([key, x]) => ({ key, name: x.name, count: x.ids.size })),
+    ...[...by.values()].map((g) => ({
+      key: `~n:${[...g.forms.keys()].map((f) => encodeURIComponent(f.toLowerCase())).sort().join(",")}`,
+      name: up([...g.forms.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0]),
+      count: g.ids.size,
+    })),
+  ].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
 }
 
 function atom(a: string, set: AnswerFactSet): Pred {

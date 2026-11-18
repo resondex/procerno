@@ -584,6 +584,9 @@ export interface PanelBlock {
   rows: PanelBrandRow[];
   /** The selection the rows are (fact layer). Never drawn. */
   selection?: string;
+  /** Fact layer: the competitor group's "Other" row with NO bar (a block whose shares do not add to 100% - What's
+   * popular, Premium vs basic); it opens the brands inside it. */
+  other?: PanelOther;
 }
 export interface PanelLine {
   label: string;
@@ -604,6 +607,8 @@ export interface PanelTable {
   columns: string[];
   style: "compare" | "bars";
   rows: { label: string; cells: (PanelNum | PanelSpan | null)[] }[];
+  /** The selection the rows are (fact layer). Never drawn. */
+  selection?: string;
 }
 
 export interface RivalStepDetail {
