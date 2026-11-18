@@ -183,7 +183,7 @@ const tableNums = (w: W, t: PanelTable | undefined, p: string) => {
       if (!c) return;
       const words = `${t.title} - ${r.label} - ${t.columns[i] ?? ""}`;
       const cp = `${p}/${k(t.title)}/${k(r.label)}/${i}`;
-      if (isSpan(c)) text(w, c.t, cp, words);
+      if (isSpan(c)) text(w, [c], cp, words);
       else num(w, c, words, cp);
     });
 };

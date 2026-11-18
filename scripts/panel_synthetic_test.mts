@@ -1,26 +1,20 @@
 /**
- * Zero-spend test of the panels' grouped-reasons path (am31, PANEL_BUILD_SPEC
- * section 8, E10): the fixture is keyless, so the map never builds the run's
- * reason themes and every panel there reads flat condition groups. This test
- * drives the themed path in memory:
+ * Zero-spend test of the panels' grouped-reasons path (am31, PANEL_BUILD_SPEC section 8, E10; on the fact layer since
+ * am80): the fixture is keyless, so the map never builds the run's reason themes and every panel there reads flat
+ * condition groups. This test drives the themed path in memory:
  *
  *   npx tsx scripts/panel_synthetic_test.mts
  *
- * Loads the American Express fixture ViewData (sqlite, keys blanked), deep-
- * copies three cells' answers (expansion, a what-to-buy buying situation, your
- * customers looking around), injects decision rules made from each answer's
- * own coded arguments (toward, away to an active rival, and an "elsewhere"
- * destination), builds the rules capture and a synthetic two-level ThemeMap
- * over those groups, then runs themedConds + buildPanels and asserts: grouped
- * rows, every share over ALL the cell's answers, every example answer states
- * the row's rule, the "elsewhere" rows are present, toward and away never share
- * an example, and nothing was written to the database (no model call is
- * possible: every key is blank).
+ * Loads the American Express fixture ViewData (sqlite, keys blanked) and its answer facts, and for three cells'
+ * answers (expansion, a what-to-buy buying situation, your customers looking around - and What to use alongside you)
+ * injects condition statements made from each answer's own coded arguments into the answer facts (a toward theme, an
+ * away theme sending the buyer to an active rival, and an "elsewhere" group), then runs buildPanels on the fact layer
+ * and asserts: grouped rows, every share over ALL the cell's answers, every example answer states the row's rule, the
+ * "elsewhere" rows are present, toward and away never share an example, and nothing was written to the database (no
+ * model call is possible: every key is blank).
  */
 import type { PanelCondition, PositionPanel } from "../src/lib/engine/analysis_types";
 import type { PoolRow } from "../src/lib/engine/view_data";
-import type { RuleGroup } from "../src/lib/engine/rules_explorer";
-import type { AnswerRules, ThemeMap } from "../src/lib/engine/reason_themes";
 process.env.DATABASE_URL = "";
 process.env.SQLITE_PATH = process.cwd() + "/data/dashboard_fixture.db";
 for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY", "PERPLEXITY_API_KEY", "FIREWORKS_API_KEY"]) process.env[k] = "";
@@ -36,8 +30,11 @@ const { store } = await import(process.cwd() + "/src/lib/store/index.ts");
 const { loadViewData, poolOf } = await import(process.cwd() + "/src/lib/engine/view_data.ts");
 const { buildResolver } = await import(process.cwd() + "/src/lib/engine/brand_resolve.ts");
 const { famTokens } = await import(process.cwd() + "/src/lib/engine/brand_family.ts");
-const { EVERY_BUYER, slKey } = await import(process.cwd() + "/src/lib/engine/reason_themes.ts");
-const { buildPanels, themedConds, knOf } = await import(process.cwd() + "/src/lib/engine/panel_build.ts");
+const { buildPanels, knOf } = await import(process.cwd() + "/src/lib/engine/panel_build.ts");
+const { buildAnswerFacts } = await import(process.cwd() + "/src/lib/engine/facts/answer_facts.ts");
+const { attachProducts } = await import(process.cwd() + "/src/lib/engine/facts/products.ts");
+const { factBook } = await import(process.cwd() + "/src/lib/engine/facts/fact.ts");
+const { selectionBook } = await import(process.cwd() + "/src/lib/engine/facts/selections.ts");
 const { productNoun, pluralNoun } = await import(process.cwd() + "/src/lib/engine/panel_text.ts");
 const { wordingIndex } = await import(process.cwd() + "/src/lib/engine/panel_filter.ts");
 
@@ -117,93 +114,60 @@ const helpers = {
   scopes: new Map<string, string>(),
 };
 
+/** The run's answer facts, once: the cells below inject their own condition statements into them. */
+const factSet = buildAnswerFacts(data);
+attachProducts(factSet, project.category);
+const factById = new Map(factSet.facts.map((f: { responseId: string }) => [f.responseId, f]));
+
 /**
- * One cell, themed: deep-copied answers with injected rules. Each answer
- * states one toward rule, one away rule (to the rival) and, every third
- * answer, one "elsewhere" rule - the conditions are worded from the answer's
- * own coded arguments, so every rule is the answer's own.
+ * One cell, themed: the answers' facts get injected condition statements. Each answer states one toward theme, one
+ * away theme (sending the buyer to the rival) and, every third answer, one "elsewhere" group - the conditions are worded
+ * from the answer's own coded arguments, so every rule is the answer's own.
  */
 function themedCell(id: string, kind: string, rows0: PoolRow[], towardChoice: string) {
   const rows: PoolRow[] = rows0.map((r) => ({ ...r, code: JSON.parse(JSON.stringify(r.code)) }));
-  const groups = new Map<string, { label: string; side: "you" | "away" | "elsewhere"; theme: number }>();
-  const cellAnswers = new Map<string, Map<string, Set<string>>>();
-  const answerRules: AnswerRules = new Map();
   const ruled = new Map<string, Set<string>>();
-  const add = (side: "you" | "away" | "elsewhere", label: string, theme: number, r: PoolRow, to: string[], card: string, cardTo: string | null) => {
-    const gid = `${side}:${label}`;
-    if (!groups.has(gid)) groups.set(gid, { label, side, theme });
-    const per = cellAnswers.get(gid) ?? new Map<string, Set<string>>();
-    const set = per.get(r.intent.id) ?? new Set<string>();
-    set.add(r.code.response_id);
-    per.set(r.intent.id, set);
-    cellAnswers.set(gid, per);
-    const ar = answerRules.get(gid) ?? new Map();
-    ar.set(r.code.response_id, { said: label, to, model: r.model, intent: r.intent.id, cards: card ? [card] : [], cardTo: card ? [cardTo] : [], mixed: 1 });
-    answerRules.set(gid, ar);
-    ruled.set(r.code.response_id, new Set([...(ruled.get(r.code.response_id) ?? []), label]));
-  };
+  const elsewhere = new Set<string>();
+  const rivalKey = resolve(rival).key;
+  const TOWARD = ["Grouped toward one", "Grouped toward two"];
+  const AWAY = ["Grouped away one", "Grouped away two"];
   rows.forEach((r, i) => {
+    const f = factById.get(r.code.response_id) as { conds: unknown[] | null } | undefined;
+    if (!f) return;
     const codes = r.code.reasons?.length ? r.code.reasons : ["the basics"];
     const tLabel = `values ${codes[0]}`;
     const aLabel = `cares most about ${codes[codes.length - 1]}`;
-    add("you", tLabel, i % 2, r, [], towardChoice, null);
-    add("away", aLabel, i % 2, r, [rival], `${rival} card`, rival);
-    if (i % 3 === 0) add("elsewhere", `would rather keep things ${i % 2 ? "simple" : "separate"}`, 0, r, [], ELSEWHERE, null);
-    r.code.decision_rules = [
-      { condition: tLabel, choice: towardChoice },
-      { condition: aLabel, choice: rival },
-      ...(i % 3 === 0 ? [{ condition: `would rather keep things ${i % 2 ? "simple" : "separate"}`, choice: ELSEWHERE }] : []),
+    const stmts: unknown[] = [
+      { unit: `t:toward:${i % 2}`, grouping: "theme", side: "toward", label: TOWARD[i % 2], said: tLabel, to: [], toKeys: [], cards: [towardChoice], cardTo: [null], groups: [`you:${tLabel}`], theme: null, keys: [] },
+      { unit: `t:away:${i % 2}`, grouping: "theme", side: "away", label: AWAY[i % 2], said: aLabel, to: [rival], toKeys: [rivalKey], cards: [`${rival} card`], cardTo: [rival], groups: [`away:${aLabel}`], theme: null, keys: [] },
     ];
-  });
-  const poolOfSide = (side: string) => [...groups.entries()].filter(([, g]) => g.side === side).map(([gid, g]) => ({ id: gid, label: g.label }) as unknown as RuleGroup);
-  // The synthetic two-level map: each label its own situation theme; totals by parity.
-  const mapOf = (side: string): ThemeMap => {
-    const stOf = new Map<string, number>();
-    const stName: string[] = [];
-    const stSit: string[] = [];
-    const totOf: number[] = [];
-    for (const [, g] of [...groups.entries()].filter(([, x]) => x.side === side)) {
-      const sit = EVERY_BUYER;
-      for (const r of rows) stOf.set(slKey(r.intent.situation || sit, g.label), stName.length);
-      stName.push(g.label);
-      stSit.push(sit);
-      totOf.push(g.theme);
+    const said = [tLabel, aLabel];
+    if (i % 3 === 0) {
+      const e = `would rather keep things ${i % 2 ? "simple" : "separate"}`;
+      elsewhere.add(e);
+      said.push(e);
+      stmts.push({ unit: `g:elsewhere:${e}`, grouping: "group", side: "away", label: e, said: e, to: [], toKeys: [], cards: [ELSEWHERE], cardTo: [null], groups: [`elsewhere:${e}`], theme: null, keys: [] });
     }
-    return { stOf, stName, stSit, totOf, totName: side === "you" ? ["Grouped toward one", "Grouped toward two"] : ["Grouped away one", "Grouped away two"] };
-  };
-  const sitOf = new Map(rows.map((r) => [r.intent.id, r.intent.situation || EVERY_BUYER]));
-  const cellIntents = new Set(rows.map((r) => r.intent.id));
-  const conds = themedConds({
-    towardPool: poolOfSide("you"),
-    awayPool: poolOfSide("away"),
-    elsewherePool: poolOfSide("elsewhere"),
-    toward: mapOf("you"),
-    away: mapOf("away"),
-    cellAnswers,
-    answerRules,
-    sitOf,
-    cellIntents,
-    inCell: new Set(rows.map((r) => r.code.response_id)),
-    pairs: [],
-    bearing: rows.length,
-    own: project.brand,
+    f.conds = stmts;
+    ruled.set(r.code.response_id, new Set(said));
   });
+  const cellIntents = new Set(rows.map((r) => r.intent.id));
   const input = {
     id,
     kind,
     row: id.split(":")[1],
     key: id.split(":").slice(2).join(":"),
     label: rows[0]?.intent.situation ?? "",
-    pooled: false,
+    pooled: id.endsWith(":all"),
     rows,
     you: [],
     them: [],
     cellIntents,
-    conds,
     lifts: [],
   };
-  const panel = buildPanels(new Map([[id, input]]), helpers).get(id) as PositionPanel | undefined;
-  return { rows, panel, ruled, elsewhere: [...groups.values()].filter((g) => g.side === "elsewhere").map((g) => g.label) };
+  const book = factBook(factSet);
+  const panel = buildPanels(new Map([[id, input]]), { ...helpers, facts: { set: factSet, book, sel: selectionBook(factSet, book, data), themed: true } }).get(id) as PositionPanel | undefined;
+  return { rows, panel, ruled, elsewhere: [...elsewhere] };
 }
 
 function check(name: string, t: ReturnType<typeof themedCell>) {
@@ -311,12 +275,14 @@ const al = themedCell("settled:settled:ecosystem", "alongside", eco, project.bra
   ok(validateLabel(good, lctx) === null, "labels: the good label fails the validator");
   // The label lands in the claim.
   const rows = eco.map((r) => ({ ...r, code: JSON.parse(JSON.stringify(r.code)) }));
-  const inp = { id: "settled:settled:ecosystem", kind: "alongside", row: "settled", key: "ecosystem", label: "Ecosystem", pooled: false, rows, you: [], them: [], cellIntents: new Set(rows.map((r) => r.intent.id)), conds: { toward: [], away: [], bearing: 0, grouped: false }, lifts: [], asked: r1.asked.get(ask[0].id) };
-  const pnl = buildPanels(new Map([[inp.id, inp]]), helpers).get(inp.id) as PositionPanel | undefined;
+  const inp = { id: "settled:settled:ecosystem", kind: "alongside", row: "settled", key: "ecosystem", label: "Ecosystem", pooled: false, rows, you: [], them: [], cellIntents: new Set(rows.map((r) => r.intent.id)), lifts: [], asked: r1.asked.get(ask[0].id) };
+  const book = factBook(factSet);
+  const fhelpers = { ...helpers, facts: { set: factSet, book, sel: selectionBook(factSet, book, data), themed: true } };
+  const pnl = buildPanels(new Map([[inp.id, inp]]), fhelpers).get(inp.id) as PositionPanel | undefined;
   const claimText = (pnl?.claim ?? []).map((x) => x.t).join("");
   ok(claimText.startsWith(`When a customer asks ${good}, the AI`), `labels: the claim does not carry the label (${claimText})`);
   const inp2 = { ...inp, asked: r2.asked.get(ask[0].id) };
-  const p2 = buildPanels(new Map([[inp2.id, inp2]]), helpers).get(inp2.id) as PositionPanel | undefined;
+  const p2 = buildPanels(new Map([[inp2.id, inp2]]), fhelpers).get(inp2.id) as PositionPanel | undefined;
   ok((p2?.claim ?? []).map((x) => x.t).join("").includes(`"${seed.trim()}"`), "labels: the fallback claim does not quote the seed");
   console.log(`labels: valid -> "${claimText.slice(0, 110)}" | invalid -> quoted seed`);
 }

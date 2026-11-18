@@ -185,6 +185,9 @@ function term(t: string, set: AnswerFactSet): Pred {
       return (f) => sentProductsOf(f, set).includes(arg);
     case "insteadprod":
       return (f) => insteadProductsOf(f, set).includes(arg);
+    case "insteadbrandprod":
+      // A price answer recommends, instead, some product of that rival (the run's one product grouping).
+      return (f) => insteadProductsOf(f, set).some((pid) => set.products?.get(pid)?.key === arg);
     case "ownopt":
       return (f) => ownOptionProductsOf(f, set).includes(arg);
     case "rulename": {
@@ -192,6 +195,29 @@ function term(t: string, set: AnswerFactSet): Pred {
       const choice = arg.slice(0, i);
       const forms = new Set(arg.slice(i + 1).split(",").map((x) => decodeURIComponent(x)));
       return (f) => !!f.rules?.some((r) => r.choice.trim() === choice && !!r.product?.trim() && set.resolve(r.product.trim()).status !== "active" && forms.has(looseForm(r.product.trim()).toLowerCase()));
+    }
+    case "pairin":
+    case "firstpair": {
+      // A pairings selection's member (selections.ts "pairings" / "first_pairing"): "d:<entry>" a brand in analysis,
+      // "~w:<forms>" names as written (each URI-encoded); firstpair = the answer's first named pairing is it.
+      const d = arg.startsWith("d:") ? arg.slice(2) : null;
+      const pid = arg.startsWith("p:") ? arg.slice(2) : null;
+      const forms = d || pid ? null : new Set(arg.replace(/^~w:/, "").split(",").map((x) => decodeURIComponent(x)));
+      const is = (p: NonNullable<AnswerFact["pairings"]>[number]) =>
+        pairingCounts(p, set) && (d ? p.bucket === "in_analysis" && p.key === d : pid ? pairingProduct(p, set) === pid : (head === "firstpair" ? !pairingProduct(p, set) : p.bucket !== "in_analysis") && forms!.has(p.name.trim()));
+      if (head === "firstpair") return (f) => {
+        const p = (f.pairings ?? []).find((x) => x.name.trim());
+        return !!p && is(p);
+      };
+      return (f) => !!f.pairings?.some(is);
+    }
+    case "pairrel":
+      // It names something alongside of that maker relation; "own" never counts the tracker's bare name.
+      return (f) =>
+        !!f.pairings?.some((p) => p.relation === arg && !(arg === "own" && p.key === set.target.key && !set.productTest?.passes(p.name.trim())));
+    case "sentw": {
+      const want = decodeURIComponent(arg);
+      return (f) => !!f.sent?.outside.some((w) => w.trim().toLowerCase() === want);
     }
     case "sentname": {
       const want = arg.trim().toLowerCase();
@@ -201,6 +227,23 @@ function term(t: string, set: AnswerFactSet): Pred {
       throw new Error(`fact layer: slice "${t}": unknown term "${head}"`);
   }
 }
+
+
+/** An alongside pairing a card counts: a name with a capital or a digit (never a generic word in lower case), never the
+ * tracker's bare name (resolves to it and names no product of it - the run's one product grouping), never a brand outside
+ * of analysis (ruling 8). */
+export function pairingCounts(p: { name: string; key: string | null; bucket: string }, set: AnswerFactSet): boolean {
+  const nm = p.name.trim();
+  if (!nm || !/[A-Z0-9]/.test(nm)) return false;
+  if (p.bucket === "outside_analysis") return false;
+  if (p.key === set.target.key && !set.productTest?.passes(nm)) return false;
+  return true;
+}
+
+/** The first-named list's member for a pairing (selections.ts "first_pairing"): a product of a brand in analysis by the
+ * run's one product grouping ("p:<product id>"), else null (grouped as written). */
+export const pairingProduct = (p: { name: string; key: string | null; bucket: string }, set: AnswerFactSet): string | null =>
+  p.bucket === "in_analysis" && p.key ? (set.nameProductOf ?? set.productOf)?.(p.key, p.name.trim()) ?? null : null;
 
 /** A product name as written, cleaned for display: no trade marks, no "from <maker>" tail. */
 export const looseForm = (x: string) => x.replace(/[®™]/g, "").replace(/\s+from\s+.+$/i, "").replace(/\s+/g, " ").trim() || x.trim();

@@ -42,7 +42,7 @@ import type { ViewData } from "../view_data";
 import type { AnswerFact, AnswerFactSet, QuestionType } from "./answer_facts";
 import { scopeKey, WHAT_TO_BUY_ALL, type FactBook, type Scope } from "./fact";
 import { MEASURE_BY_ID, PICK_TYPES } from "./measure_book";
-import { endItems, firstProductOf, firstSentOf, insteadProductsOf, ownOptionProductsOf, productsOf, sentProductsOf, slicePred } from "./slices";
+import { endItems, firstProductOf, pairingCounts, pairingProduct, firstSentOf, insteadProductsOf, ownOptionProductsOf, productsOf, sentProductsOf, slicePred } from "./slices";
 
 /* ------------------------------- the shape ------------------------------- */
 
@@ -176,6 +176,9 @@ export const RATIFIED_COMPETITORS_RULE =
 export const RATIFIED_COMPETITORS_REC_RULE =
   "The ratified shape ranked by recommendations (cards that take few picks): the three rivals recommended in the most answers (a pick counts as recommended), then the tracker's head-to-head rivals not among them (tagged head-to-head); class brands stay out; listed rivals keep that order. Other: every remaining brand in analysis - by name when named in at least 10% of the answers or picked at least 5 times, the rest as a count.";
 
+export const RATIFIED_COMPETITORS_NAMED_RULE =
+  "The ratified shape ranked by answers naming the brand (a card that takes no picks): the three rivals named in the most answers (the card's own floor), then the tracker's head-to-head rivals not among them (tagged head-to-head); class brands stay out; listed rivals keep that order. Other: every remaining brand in analysis - by name when named in at least 10% of the answers, the rest as a count.";
+
 export interface CompetitorExtras {
   mode: "ratified" | "as_cards";
   card?: CompetitorCard;
@@ -230,8 +233,8 @@ function competitorsAsCards(set: AnswerFactSet, rows: Fact[], scope: Scope, card
   return list.filter((b) => b.key !== T && b.count >= floor && !(dropClass && cls.has(b.key)) && b.key !== leaving).slice(0, F.compTop);
 }
 
-function competitorsRatified(set: AnswerFactSet, rows: Fact[], scope: Scope, rankBy: "picks" | "recommended" = "picks"): { members: SelMember[]; extras: CompetitorExtras } {
-  for (const t of scope.types) if (!PICK_TYPES.includes(t)) throw new Error(`selection "competitors" (ratified): ranks by picks, and question type "${t}" takes no picks - refused (use mode "as_cards" for today's card)`);
+function competitorsRatified(set: AnswerFactSet, rows: Fact[], scope: Scope, rankBy: "picks" | "recommended" | "named" = "picks", floor = 0): { members: SelMember[]; extras: CompetitorExtras } {
+  if (rankBy === "picks") for (const t of scope.types) if (!PICK_TYPES.includes(t)) throw new Error(`selection "competitors" (ratified): ranks by picks, and question type "${t}" takes no picks - refused (use mode "as_cards" for today's card)`);
   const T = set.target.key;
   const cls = classKeysOf(set);
   const inPick = rows.filter((f) => f.pick.state === "in_analysis");
@@ -250,11 +253,13 @@ function competitorsRatified(set: AnswerFactSet, rows: Fact[], scope: Scope, ran
   const pk = (k: string) => picks.get(k) ?? 0;
   // The ranking measure: picks (the pick cards), or recommendations (What's popular and Premium vs basic, which take
   // few picks) - the card's own measure, the ratified shape either way.
-  const rk = (k: string) => (rankBy === "recommended" ? recs.get(k) ?? 0 : pk(k));
+  const rk = (k: string) => (rankBy === "recommended" ? recs.get(k) ?? 0 : rankBy === "named" ? named.get(k) ?? 0 : pk(k));
   const byRank = (a: { key: string; name: string }, b: { key: string; name: string }) => rk(b.key) - rk(a.key) || a.name.localeCompare(b.name);
   // A rival being left (a switching cell) is the question's own brand, never one of its competitors.
   const leaving = scope.types.length === 1 && scope.types[0] === "switching" ? scope.rival : undefined;
-  const rivals = [...names.entries()].map(([key, name]) => ({ key, name })).filter((b) => b.key !== T && !cls.has(b.key) && b.key !== leaving && rk(b.key) > 0);
+  // The card's own floor (Spotting the problem: 5 recommendations; Learning the category: 3 answers naming it) holds
+  // for the top three; the head-to-head rivals are listed whatever their count (the ratified shape).
+  const rivals = [...names.entries()].map(([key, name]) => ({ key, name })).filter((b) => b.key !== T && !cls.has(b.key) && b.key !== leaving && rk(b.key) > 0 && rk(b.key) >= floor);
   const top = rivals.sort(byRank).slice(0, SEL_FLOORS.ratifiedTop);
   const listed: SelMember[] = top.map((b) => ({ key: b.key, name: b.name, count: rk(b.key) }));
   const h2h = headToHeadKeysOf(set)
@@ -544,13 +549,17 @@ function condSources(rows: Fact[], side: "toward" | "away", flavor: CondFlavor, 
   return [...out.values()];
 }
 
+
+
 /* ------------------------------- the book ------------------------------- */
 
 export interface SelectionOpts {
   /** competitors / averageCompetitor: "ratified" (default) or "as_cards" (with `card`). */
   mode?: "ratified" | "as_cards";
-  /** competitors (ratified): the card's own ranking measure - picks (default) or recommendations. */
-  rankBy?: "picks" | "recommended";
+  /** competitors (ratified): the card's own ranking measure - picks (default), recommendations or answers naming it;
+   * and the card's own floor for the top three (default none). */
+  rankBy?: "picks" | "recommended" | "named";
+  floor?: number;
   /** ends: the end a rule chooses ("premium" / "basic"). */
   choice?: string;
   /** vendors: the fewest answers an AI company needs in the scope. */
@@ -576,7 +585,83 @@ export interface SelectionOpts {
   brand?: string;
   /** pick_brands: the tracker first, then the others (Habit's "who gets it"). */
   youFirst?: boolean;
+  /** cond_products: count products named and never picked too (the run's named products - nameProductOf). */
+  named?: boolean;
+  /** conditions_shown: move an away row whose products are mostly the tracker's own to the toward side (alongside). */
+  ownSplit?: boolean;
+  /** pick_brands: brands left out (a rival's own page leaves the rival out). */
+  exclude?: string[];
+  /** named_brands / redirect_dests / pairings / first_pairing / first_named: the slice of the scope's answers counted. */
+  slice?: string;
+  /** case_args: the strong answers' slice, the slice they are set against, the fewest strong answers a topic needs, and
+   * whether the question's quoted criticism counts as its wording (answering a critic). */
+  strong?: string;
+  rest?: string;
+  minK?: number;
+  critic?: boolean;
+  /** arg_lift: the floors - "summary" (the brand summary's: 20 answers a side, 2% incidence) or "local" (none). */
+  lift?: "summary" | "local";
 }
+
+/** The selections whose parameters ride in their id as JSON ("~j{...}"): parseSelectionId reads them back. */
+const JSON_SELECTIONS = new Set(["topics_shown", "arg_lift", "named_brands", "first_named", "situations", "redirect_dests", "pairings", "first_pairing", "cond_cards", "case_args", "adjacent_names", "pick_args_diff", "question_types"]);
+
+/** A selection id read back into its name, subject, scope and parameters (for a proof that recomputes it from the id
+ * alone). Covers the JSON-parameter selections and the competitor group. */
+export function parseSelectionId(id: string): { name: string; subject: string; scope: Scope; opts: SelectionOpts } | null {
+  if (!id.startsWith("sel:")) return null;
+  const body = id.slice(4);
+  const bar = body.indexOf("|");
+  const full = body.slice(0, bar);
+  const rest = body.slice(bar + 1);
+  const t0 = rest.indexOf("|t=");
+  const subject = rest.slice(0, t0);
+  const scope = scopeFromKey(rest.slice(t0 + 1));
+  const tilde = full.indexOf("~");
+  const name = tilde >= 0 ? full.slice(0, tilde) : full;
+  const param = tilde >= 0 ? full.slice(tilde + 1) : "";
+  if (JSON_SELECTIONS.has(name)) return { name, subject, scope, opts: JSON.parse(param.slice(1)) as SelectionOpts };
+  if (name === "competitors") {
+    const parts = param.split(":");
+    const opts: SelectionOpts = { mode: parts[0] as "ratified" | "as_cards" };
+    for (const x of parts.slice(1)) {
+      if (x === "rec") opts.rankBy = "recommended";
+      else if (x === "named") opts.rankBy = "named";
+      else if (/^f\d+$/.test(x)) opts.floor = Number(x.slice(1));
+      else opts.card = x as CompetitorCard;
+    }
+    return { name, subject, scope, opts };
+  }
+  return null;
+}
+
+/** A scope from its key (scopeKey's inverse). */
+export function scopeFromKey(key: string): Scope {
+  const parts = key.split("|");
+  const sc: { types?: string[]; situation?: string | null; worry?: string; rival?: string; line?: string; engines?: string[]; vendor?: string; when?: string } = {};
+  for (let i = 0; i < parts.length; i++) {
+    const pt = parts[i];
+    const k = pt.slice(0, 2);
+    const v = pt.slice(2);
+    if (k === "t=") sc.types = v.split("+");
+    else if (k === "s=") sc.situation = v === "~none" ? null : v;
+    else if (k === "w=") sc.worry = v;
+    else if (k === "r=") sc.rival = v;
+    else if (k === "l=") sc.line = v;
+    else if (k === "e=") sc.engines = v.split("+");
+    else if (k === "v=") sc.vendor = v;
+    else if (k === "h=") {
+      sc.when = parts.slice(i).join("|").slice(2);
+      break;
+    }
+  }
+  return sc as Scope;
+}
+
+/** A written name's key for grouping names as written (case and punctuation set aside). */
+const writtenKey = (name: string) => famTokens(name).join(" ") || name.trim().toLowerCase();
+/** A member key for a group of names as written: its forms, URI-encoded (so it can sit in a slice). */
+export const formsKey = (forms: string[]) => `~w:${[...forms].sort().map((f) => encodeURIComponent(f)).join(",")}`;
 
 /** A weighs column: its topics in drawn order (code and the side's count), or too few answers to size. */
 export interface WeighsColumn {
@@ -615,13 +700,13 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
   function selection(name: string, subject: string, scope: Scope, opts: SelectionOpts = {}): AnySelection {
     const params =
       name === "cond_destinations" || name === "cond_products"
-        ? `~${(opts.units ?? []).join("+")}${opts.to ? `>to:${opts.to}` : ""}`
+        ? `~${(opts.units ?? []).join("+")}${opts.to ? `>to:${opts.to}` : ""}${opts.named ? ":named" : ""}`
         : name === "product_picks"
           ? `~${opts.brand ?? "you"}:${opts.top ?? 2}`
           : name === "product_names" || name === "product_first" || name === "product_suggested"
             ? `~${opts.brand ?? "you"}:${opts.top ?? 0}`
             : name === "pick_brands"
-              ? `~${opts.youFirst ? "you" : "all"}:${opts.top ?? 0}`
+              ? `~${opts.youFirst ? "you" : "all"}:${opts.top ?? 0}${opts.exclude?.length ? `:x${[...opts.exclude].sort().join(",")}` : ""}`
               : name === "vendors"
                 ? `~${opts.min ?? 3}`
                 : name === "ends"
@@ -630,7 +715,7 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
                     ? `~${opts.top ?? 4}`
                     : name === "worries"
                       ? `~${opts.min ?? SEL_FLOORS.argsMin}`
-                    : name === "competitors" ? `~${opts.mode ?? "ratified"}${opts.mode === "as_cards" ? `:${opts.card}` : ""}${opts.rankBy === "recommended" ? ":rec" : ""}` : name === "conditions_shown" ? `~${opts.side}:${opts.flavor}${opts.towardOnly ? `@${opts.towardOnly}` : ""}${opts.to ? `>to:${opts.to}` : ""}` : name === "weighs_shown" ? `~${JSON.stringify(opts.sides ?? [{}])}:${opts.top ?? 3}:${opts.list ?? "weighs"}` : "";
+                    : name === "competitors" ? `~${opts.mode ?? "ratified"}${opts.mode === "as_cards" ? `:${opts.card}` : ""}${opts.rankBy === "recommended" ? ":rec" : opts.rankBy === "named" ? ":named" : ""}${opts.floor ? `:f${opts.floor}` : ""}` : JSON_SELECTIONS.has(name) ? `~j${JSON.stringify(opts)}` : name === "conditions_shown" ? `~${opts.side}:${opts.flavor}${opts.towardOnly ? `@${opts.towardOnly}` : ""}${opts.to ? `>to:${opts.to}` : ""}${opts.ownSplit ? ":own" : ""}` : name === "weighs_shown" ? `~${JSON.stringify(opts.sides ?? [{}])}:${opts.top ?? 3}:${opts.list ?? "weighs"}` : "";
     const fullName = `${name}${params}`;
     const id = selectionId(fullName, subject, scope);
     const hit = memo.get(id);
@@ -644,8 +729,8 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
           if (!opts.card) throw new Error(`selection "competitors" (as_cards): name the card kind`);
           out = { id, name: fullName, subject, scope, rule: AS_CARDS_RULE[opts.card], members: competitorsAsCards(set, rows, scope, opts.card), extras: { mode: "as_cards", card: opts.card } };
         } else {
-          const r = competitorsRatified(set, rows, scope, opts.rankBy);
-          out = { id, name: fullName, subject, scope, rule: opts.rankBy === "recommended" ? RATIFIED_COMPETITORS_REC_RULE : RATIFIED_COMPETITORS_RULE, members: r.members, extras: r.extras };
+          const r = competitorsRatified(set, rows, scope, opts.rankBy, opts.floor ?? 0);
+          out = { id, name: fullName, subject, scope, rule: opts.rankBy === "recommended" ? RATIFIED_COMPETITORS_REC_RULE : opts.rankBy === "named" ? RATIFIED_COMPETITORS_NAMED_RULE : RATIFIED_COMPETITORS_RULE, members: r.members, extras: r.extras };
         }
         break;
       }
@@ -698,6 +783,41 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
         const flavor = opts.flavor ?? "themed";
         let t = condSources(rows, "toward", flavor, side === "toward" ? undefined : opts.to);
         let a = condSources(rows, "away", flavor, opts.to);
+        if (opts.ownSplit) {
+          // What to use alongside you: an away row whose products are mostly the tracker's own sits with "something of
+          // yours" - over its answers naming a product, more than half name only the tracker's own (a name resolving to
+          // the tracker, or one the answer pairs as its own).
+          const byId0 = new Map(rows.map((f) => [f.responseId, f]));
+          const ownCard = (f: Fact, c: string) => set.resolve(c).key === T || (f.pairings ?? []).some((p) => p.relation === "own" && writtenKey(p.name) === writtenKey(c));
+          const mostlyOwn = (x: Src) => {
+            let own = 0;
+            let named = 0;
+            for (const id0 of x.ids) {
+              const f = byId0.get(id0)!;
+              const cs = [...new Set((f.conds ?? []).filter((c) => x.units.has(c.unit)).flatMap((c) => c.cards))].filter((c) => c.trim());
+              if (!cs.length) continue;
+              named++;
+              if (cs.every((c) => ownCard(f, c))) own++;
+            }
+            return named > 0 && own * 2 > named;
+          };
+          const moved = a.filter(mostlyOwn);
+          if (moved.length) {
+            a = a.filter((x) => !moved.includes(x));
+            const merged = new Map<string, Src>(t.map((x) => [condKey(x.label), { ...x, units: new Set(x.units), ids: new Set(x.ids) }]));
+            for (const x of moved) {
+              const k = condKey(x.label);
+              const m0 = merged.get(k);
+              if (!m0) merged.set(k, { ...x, units: new Set(x.units), ids: new Set(x.ids) });
+              else {
+                for (const u0 of x.units) m0.units.add(u0);
+                for (const id0 of x.ids) m0.ids.add(id0);
+                if (x.ids.size > m0.ids.size) m0.label = x.label;
+              }
+            }
+            t = [...merged.values()];
+          }
+        }
         // The same condition on both sides under near-identical names: one label, the larger side's (not on a rival's
         // own card, whose toward rows are the cell's own).
         const tBy = new Map<string, Src>();
@@ -807,7 +927,8 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
           for (const c of f.conds ?? []) {
             if (!units.has(c.unit)) continue;
             for (const card of c.cards) {
-              const pid = card.trim() && set.productOf ? set.productOf(T, card) : null;
+              const of = opts.named ? set.nameProductOf ?? set.productOf : set.productOf;
+              const pid = card.trim() && of ? of(T, card) : null;
               if (!pid) continue;
               const t = by.get(pid) ?? { name: set.products!.get(pid)!.short, ids: new Set<string>() };
               t.ids.add(f.responseId);
@@ -917,8 +1038,9 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
         // name); or (youFirst) the tracker, then the `top` others with the most picks.
         const by = tally(rows.filter((f) => f.pick.state === "in_analysis"), (f) => [{ key: f.pick.key!, name: f.pick.key === T ? set.target.name : f.pick.name! }]);
         const list = rank(by);
+        const ex = new Set(opts.exclude ?? []);
         const members = opts.youFirst
-          ? [list.find((b) => b.key === T) ?? { key: T, name: set.target.name, count: 0 }, ...list.filter((b) => b.key !== T).slice(0, opts.top ?? 3)]
+          ? [list.find((b) => b.key === T) ?? { key: T, name: set.target.name, count: 0 }, ...list.filter((b) => b.key !== T && !ex.has(b.key)).slice(0, opts.top ?? 3)]
           : list.filter((b) => b.count >= SEL_FLOORS.rowMin);
         out = { id, name: fullName, subject, scope, rule: opts.youFirst ? "The tracker, then the three other brands in analysis picked most (a card draws those with 3 picks at least)." : "Every brand in analysis picked in 3 answers at least, most picks first, ties by name.", members, extras: { base: rows.filter((f) => f.pick.state === "in_analysis").length } };
         break;
@@ -1070,6 +1192,243 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
           members: byNamed(placed).map((k) => ({ key: k, name: names.get(k)!, count: fk("named", k).k })),
           extras: { folded: byNamed(folded).map((k) => ({ key: k, name: names.get(k)! })) },
         };
+        break;
+      }
+      case "topics_shown": {
+        // The topics a card lists (Spotting the problem, Learning the category): raised in `floor` answers at least,
+        // most raised first (ties by name), a topic in 90% of the answers whose name the question says left out, top
+        // `top`.
+        const by = new Map<string, number>();
+        for (const f of rows) for (const a of new Set(f.args ?? [])) by.set(a, (by.get(a) ?? 0) + 1);
+        const ranked = [...by.entries()]
+          .filter(([, k]) => k >= (opts.floor ?? 0))
+          .map(([code, k]) => ({ code, k, share: rows.length ? k / rows.length : 0 }))
+          .sort((a, b) => b.k - a.k || a.code.localeCompare(b.code));
+        const kept = filterObvious(ranked, id, opts.list ?? "topics", wordingsOf(rows), new Map(), "", undefined).slice(0, opts.top ?? 6);
+        out = { id, name: fullName, subject, scope, rule: `The topics the answers raise most (${opts.floor ?? 0} answers at least, ties by name), a topic in 90% or more of the answers whose name the question says left out; top ${opts.top ?? 6}.`, members: kept.map((x) => ({ key: x.code, name: x.code, count: x.k })), extras: {} };
+        break;
+      }
+      case "arg_lift": {
+        // The arguments that come up more when the subject is the pick than when another brand in analysis is
+        // (ruling 2), with both sides' counts. "summary": both sides 20 answers carrying arguments at least, and an
+        // argument raised in 2% of them (the brand summary's floors); "local": no floor (the card checks its sides).
+        const key = subjKey(subject);
+        const withA = rows.filter((f) => f.args !== null);
+        const wins = withA.filter((f) => f.pick.state === "in_analysis" && f.pick.key === key);
+        const others = withA.filter((f) => f.pick.state === "in_analysis" && f.pick.key !== key);
+        const count = (rs: Fact[], code: string) => rs.filter((f) => f.args!.includes(code)).length;
+        let codes: string[] = [];
+        if (opts.lift === "summary") {
+          if (wins.length >= 20 && others.length >= 20) {
+            const by = new Map<string, number>();
+            for (const f of withA) for (const a of f.args!) by.set(a, (by.get(a) ?? 0) + 1);
+            codes = [...by.entries()].filter(([, k]) => k / withA.length >= 0.02).map(([c]) => c);
+          }
+        } else codes = [...new Set([...wins, ...others].flatMap((f) => f.args!))];
+        const members = codes
+          .map((code) => {
+            const w = { k: count(wins, code), n: wins.length };
+            const o = { k: count(others, code), n: others.length };
+            return { key: code, name: code, count: w.k, wins: w, others: o, lift: (w.n ? w.k / w.n : 0) - (o.n ? o.k / o.n : 0) };
+          })
+          .sort((a, b) => b.lift - a.lift || a.key.localeCompare(b.key));
+        out = { id, name: fullName, subject, scope, rule: `Every argument, with how often it comes up when the brand is the pick and when another brand in analysis is (ruling 2)${opts.lift === "summary" ? "; both sides 20 answers at least, and an argument in 2% of the answers" : ""}; largest lift first.`, members, extras: { base: wins.length } };
+        break;
+      }
+      case "named_brands": {
+        // The brands in analysis the scope's answers (or a slice of them) name: `floor` answers at least, most first
+        // (ties by name); the tracker left out, or (youFirst) first; top `top`.
+        const rs = opts.slice ? rows.filter(slicePred(opts.slice, set)) : rows;
+        const list = rank(tally(rs, (f) => f.brands.filter((b) => b.bucket === "in_analysis").map((b) => ({ key: b.key, name: b.key === T ? set.target.name : b.name })))).filter((m) => m.count >= (opts.floor ?? 0));
+        const you = list.filter((m) => m.key === T);
+        const members = [...(opts.youFirst ? you : []), ...list.filter((m) => m.key !== T)].slice(0, opts.top ?? 5);
+        out = { id, name: fullName, subject, scope, rule: `The brands in analysis the answers name (${opts.floor ?? 0} answers at least), ${opts.youFirst ? "the tracker first, then " : "the tracker left out, "}most first, ties by name; top ${opts.top ?? 5}.`, members, extras: { base: rs.length } };
+        break;
+      }
+      case "first_named": {
+        // Per answer naming a brand in analysis, the one it names first; the tracker first (youFirst), then the others
+        // most first (ties by name), top `top`.
+        const by = new Map<string, { name: string; ids: Set<string> }>();
+        let base = 0;
+        for (const f of rows) {
+          const b = f.brands.filter((x) => x.bucket === "in_analysis").sort((x, y) => x.order - y.order)[0];
+          if (!b) continue;
+          base++;
+          const t = by.get(b.key) ?? { name: b.key === T ? set.target.name : b.name, ids: new Set<string>() };
+          t.ids.add(f.responseId);
+          by.set(b.key, t);
+        }
+        const list = rank(by);
+        const members = [...(opts.youFirst ? list.filter((m) => m.key === T) : []), ...list.filter((m) => m.key !== T).slice(0, opts.top ?? 3)];
+        out = { id, name: fullName, subject, scope, rule: "Of the answers naming a brand in analysis, the brand each names first: the tracker first, then the others most first, ties by name.", members, extras: { base } };
+        break;
+      }
+      case "situations": {
+        // The buying situations the scope's answers are asked for, each with `min` answers at least, by name.
+        const by = new Map<string, number>();
+        for (const f of rows) if (f.situation) by.set(f.situation, (by.get(f.situation) ?? 0) + 1);
+        const members = [...by.entries()].filter(([, n]) => n >= (opts.min ?? 1)).map(([w, n]) => ({ key: w, name: w, count: n })).sort((a, b) => a.name.localeCompare(b.name));
+        out = { id, name: fullName, subject, scope, rule: `The buying situations the answers are asked for, each with ${opts.min ?? 1} answers at least, by name.`, members, extras: {} };
+        break;
+      }
+      case "question_types": {
+        // The question types in the scope with `min` answers at least.
+        const by = new Map<string, number>();
+        for (const f of rows) by.set(f.type, (by.get(f.type) ?? 0) + 1);
+        const members = [...by.entries()].filter(([, n]) => n >= (opts.min ?? 1)).map(([w, n]) => ({ key: w, name: w, count: n })).sort((a, b) => a.name.localeCompare(b.name));
+        out = { id, name: fullName, subject, scope, rule: `The question types in the scope with ${opts.min ?? 1} answers at least, by name.`, members, extras: {} };
+        break;
+      }
+      case "redirect_dests": {
+        // Where the answers in a slice send the customer instead: brands in analysis by their entry (ruling 8: never one
+        // outside of analysis), any other name as written (case set aside); the tracker's own products left out; most
+        // first, ties by name; top `top`.
+        const rs = opts.slice ? rows.filter(slicePred(opts.slice, set)) : rows;
+        const by = new Map<string, { name: string; ids: Set<string> }>();
+        const put = (k: string, name: string, f: Fact) => {
+          const t = by.get(k) ?? { name, ids: new Set<string>() };
+          t.ids.add(f.responseId);
+          by.set(k, t);
+        };
+        for (const f of rs) {
+          for (const b of f.sent?.brands ?? []) put(b.key, b.name, f);
+          for (const w of f.sent?.outside ?? []) {
+            if (set.resolve(w).status === "active") continue;
+            const name = w.trim();
+            if (name) put(`~s:${encodeURIComponent(name.toLowerCase())}`, name, f);
+          }
+        }
+        out = { id, name: fullName, subject, scope, rule: "Where the answers send the customer instead: brands in analysis by entry, other names as written (case set aside), the tracker's own products left out; most first, ties by name.", members: rank(by).slice(0, opts.top ?? 4), extras: { base: rs.length } };
+        break;
+      }
+      case "pairings":
+      case "first_pairing": {
+        // What the AI names to use alongside (an ecosystem answer's pairings): a brand in analysis by its entry, any other
+        // name grouped as written (case and punctuation set aside; a name whose words sit inside exactly one larger
+        // written group joins it); never the tracker's bare name, never a generic word written all in lower case, never a
+        // brand outside of analysis (ruling 8). "pairings": every pairing an answer names; "first_pairing": the first
+        // one it names. Most answers first, ties by name; `floor` answers at least; top `top`.
+        const first = name === "first_pairing";
+        type G = { forms: Map<string, number>; ids: Set<string>; toks: Set<string>; key: string | null };
+        const groups = new Map<string, G>();
+        let base = 0;
+        for (const f of rows) {
+          const ps = (f.pairings ?? []).filter((p) => p.name.trim());
+          if (!ps.length) continue;
+          base++;
+          for (const p of first ? ps.slice(0, 1) : ps) {
+            const nm = p.name.trim();
+            if (!pairingCounts(p, set)) continue;
+            // The first-named list is product names: a brand in analysis's product by the run's one grouping (ruling 15).
+            const pid = first ? pairingProduct(p, set) : null;
+            const k = pid ? `p:${pid}` : !first && p.bucket === "in_analysis" && p.key ? `d:${p.key}` : `w:${writtenKey(nm)}`;
+            const g = groups.get(k) ?? { forms: new Map<string, number>(), ids: new Set<string>(), toks: new Set(famTokens(nm)), key: pid ?? (p.bucket === "in_analysis" ? p.key : null) };
+            g.forms.set(nm, (g.forms.get(nm) ?? 0) + 1);
+            g.ids.add(f.responseId);
+            groups.set(k, g);
+          }
+        }
+        const small = [...groups.keys()].filter((k) => k.startsWith("w:")).sort((a, b) => groups.get(a)!.toks.size - groups.get(b)!.toks.size);
+        for (const k of small) {
+          const g = groups.get(k)!;
+          if (!g.toks.size) continue;
+          const sup = [...groups.entries()].filter(([k2, g2]) => k2 !== k && k2.startsWith("w:") && g2.toks.size > g.toks.size && [...g.toks].every((t) => g2.toks.has(t)));
+          if (sup.length !== 1) continue;
+          const into = sup[0][1];
+          for (const [fm, n] of g.forms) into.forms.set(fm, (into.forms.get(fm) ?? 0) + n);
+          for (const id2 of g.ids) into.ids.add(id2);
+          groups.delete(k);
+        }
+        const members = [...groups.entries()]
+          .map(([k, g]) => ({
+            key: k.startsWith("d:") ? `d:${g.key}` : k.startsWith("p:") ? k : formsKey([...g.forms.keys()]),
+            name: k.startsWith("d:") ? set.nameOf(g.key!) : k.startsWith("p:") ? set.products!.get(g.key!)!.full : [...g.forms.entries()].sort((a, b) => b[1] - a[1] || b[0].length - a[0].length || a[0].localeCompare(b[0]))[0][0],
+            count: g.ids.size,
+          }))
+          .filter((m) => m.count >= (opts.floor ?? 0))
+          .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+          .slice(0, opts.top ?? 6);
+        out = { id, name: fullName, subject, scope, rule: `${first ? "The first product each answer names to use alongside" : "The products the answers name to use alongside"}: a brand in analysis by entry, other names grouped as written (a name inside exactly one larger name joins it); never the tracker's bare name, a generic word in lower case or a brand outside of analysis; most first, ties by name.`, members, extras: { base } };
+        break;
+      }
+      case "cond_cards": {
+        // The products a condition row's statements name (the alongside card's destinations), grouped by their words:
+        // among the row's answers naming a product, 2 answers and 15% of them at least, most first (ties by the words),
+        // top 3; each shown in the form most written.
+        const units = new Set(opts.units ?? []);
+        const by = new Map<string, { ids: Set<string>; forms: Map<string, number> }>();
+        let routed = 0;
+        for (const f of rows) {
+          const cs = [...new Set((f.conds ?? []).filter((c) => units.has(c.unit)).flatMap((c) => c.cards.filter((x) => x.trim())))];
+          if (!cs.length) continue;
+          routed++;
+          const seen = new Set<string>();
+          for (const c of cs) {
+            const k = writtenKey(c);
+            const t = by.get(k) ?? { ids: new Set<string>(), forms: new Map<string, number>() };
+            t.forms.set(c.trim(), (t.forms.get(c.trim()) ?? 0) + 1);
+            if (!seen.has(k)) t.ids.add(f.responseId);
+            seen.add(k);
+            by.set(k, t);
+          }
+        }
+        const members = [...by.entries()]
+          .filter(([, t]) => t.ids.size >= 2 && t.ids.size / Math.max(1, routed) >= 0.15)
+          .sort((a, b) => b[1].ids.size - a[1].ids.size || a[0].localeCompare(b[0]))
+          .slice(0, 3)
+          .map(([k, t]) => ({ key: k, name: [...t.forms.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))[0][0], count: t.ids.size }));
+        out = { id, name: fullName, subject, scope, rule: "The products a condition row's statements name, among the row's answers naming one: 2 answers and 15% of them at least, most first, top 3, each in its most written form.", members, extras: { base: routed } };
+        break;
+      }
+      case "case_args": {
+        // What a strong answer argues (business case, answering a critic): arguments raised in at least 10% of the strong
+        // answers (and in `minK` of them); with 10+ answers to set them against, only those at least 10 points more common
+        // in the strong answers; most raised in the strong answers first (ties by name); a topic in 90% of all the
+        // answers whose name the question (or its quoted criticism) says left out; top 5.
+        const S = rows.filter(slicePred(opts.strong ?? "v:case_strength:strong", set));
+        const O = rows.filter(slicePred(opts.rest ?? "!v:case_strength:strong", set));
+        const gapOn = O.length >= 10;
+        const hit = (rs: Fact[], code: string) => rs.filter((f) => (f.args ?? []).includes(code)).length;
+        const codes = new Set<string>();
+        for (const f of S) for (const c of f.args ?? []) codes.add(c);
+        const ranked = [...codes]
+          .map((code) => ({ code, s: S.length ? hit(S, code) / S.length : 0, hd: gapOn ? hit(O, code) / O.length : 0, share: rows.length ? hit(rows, code) / rows.length : 0, k: hit(S, code) }))
+          .filter((x) => x.k >= (opts.minK ?? 0) && x.s >= 0.1 && (!gapOn || x.s - x.hd >= 0.1))
+          .sort((a, b) => b.s - a.s || a.code.localeCompare(b.code));
+        let wording = wordingsOf(rows);
+        if (opts.critic && data) {
+          const ci = new Set(rows.map((f) => f.intentId));
+          const extra = data.intents.filter((i) => ci.has(i.id) && i.stage === "advocacy" && i.concern?.trim()).map((i) => i.concern!.trim());
+          if (extra.length) wording = wordingIndex([...data.prompts.filter((p) => p.intent_id && ci.has(p.intent_id) && !p.staged && !p.retired).map((p) => p.text), ...data.intents.filter((i) => ci.has(i.id)).map((i) => i.text), ...extra]);
+        }
+        const all = filterObvious(ranked, id, "case", wording, new Map(), "", undefined);
+        const kept = all.slice(0, 5);
+        out = { id, name: fullName, subject, scope, rule: "Arguments raised in 10%+ of the strong answers (and in the fewest strong answers a topic needs), 10+ points more common there than in the answers they are set against (when 10+), most raised first; a topic in 90% of the answers whose name the question says left out; top 5.", members: kept.map((x) => ({ key: x.code, name: x.code, count: x.k })), extras: { base: S.length, versus: gapOn, folded: all.length < ranked.length ? [{ key: "~removed", name: "~removed" }] : [] } };
+        break;
+      }
+      case "adjacent_names": {
+        // The names an answer that points the buyer outside the category recommends there: names framed recommended that
+        // are no brand in the category, most first (ties by name), top 5.
+        const rs = rows.filter((f) => f.verdicts.category_routed === "adjacent");
+        const by = tally(rs, (f) => f.brands.filter((b) => b.framedRecommended && b.bucket === "outside_category").map((b) => ({ key: b.key, name: b.name })));
+        out = { id, name: fullName, subject, scope, rule: "Of the answers pointing the buyer to something adjacent, the names framed recommended that are no brand in the category; most first, ties by name; top 5.", members: rank(by).slice(0, 5), extras: { base: rs.length } };
+        break;
+      }
+      case "pick_args_diff": {
+        // A rival's own page: the arguments that come up more when the AI picks the rival than when it picks you (two),
+        // and more when it picks you (two) - each raised in 3+ answers picking one of you; both of you picked 5+ times.
+        const key = subjKey(subject);
+        const t = rows.filter((f) => f.args !== null && f.pick.state === "in_analysis" && f.pick.key === key);
+        const m = rows.filter((f) => f.args !== null && f.pick.state === "in_analysis" && f.pick.key === T);
+        let members: SelMember[] = [];
+        if (t.length >= 5 && m.length >= 5) {
+          const codes = new Set<string>([...t, ...m].flatMap((f) => f.args!));
+          const of = (rs: Fact[], c: string) => rs.filter((f) => f.args!.includes(c)).length;
+          const scored = [...codes].map((c) => ({ c, a: of(t, c), b: of(m, c) })).filter((x) => x.a >= 3 || x.b >= 3).map((x) => ({ ...x, d: x.a / t.length - x.b / m.length }));
+          const pick = [...scored.filter((x) => x.d > 0).sort((a, b) => b.d - a.d || a.c.localeCompare(b.c)).slice(0, 2), ...scored.filter((x) => x.d < 0).sort((a, b) => a.d - b.d || a.c.localeCompare(b.c)).slice(0, 2)];
+          members = pick.map((x) => ({ key: x.c, name: x.c, count: x.a }));
+        }
+        out = { id, name: fullName, subject, scope, rule: "The two arguments most more common when the AI picks the brand than when it picks the tracker, then the two most more common the other way; each in 3+ answers; both picked 5+ times.", members, extras: {} };
         break;
       }
       default:

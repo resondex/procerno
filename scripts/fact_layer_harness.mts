@@ -56,7 +56,7 @@ const { attachConditions } = await import(ROOT + "/src/lib/engine/facts/conditio
 const { condRowLabel } = await import(ROOT + "/src/lib/engine/panel_text.ts");
 const { isDefaultCondition } = await import(ROOT + "/src/lib/engine/condition_groups.ts");
 const { cardKey } = await import(ROOT + "/src/lib/engine/facts/measure_book.ts");
-const { selectionBook, averageCompetitor, productGroups, brandNameTokens } = await import(ROOT + "/src/lib/engine/facts/selections.ts");
+const { selectionBook, averageCompetitor, productGroups, brandNameTokens, parseSelectionId } = await import(ROOT + "/src/lib/engine/facts/selections.ts");
 const { computeBrief } = await import(ROOT + "/src/lib/engine/brief.ts");
 const { famTokens } = await import(ROOT + "/src/lib/engine/brand_family.ts");
 const { attachProducts } = await import(ROOT + "/src/lib/engine/facts/products.ts");
@@ -1098,7 +1098,9 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
   /* ---------- step 4: the fact-built cards (What to buy, switching, head-to-heads, What's popular, Premium vs basic,
    * Habit, Value, both worries, your customers looking around, and the rival cards inside them) ---------- */
   const DOUBT_KINDS = new Set(["value", "buyer_worry", "customer_worry", "looking_around"]);
-  const FACT_KINDS = new Set(["buy", "switching", "h2h", "popular", "premium", "habit", ...DOUBT_KINDS]);
+  /** The last slice (am80): the remaining kinds - their lists are checked generically from the selection ids they carry. */
+  const LAST_KINDS = new Set(["problem", "learning", "criteria", "expansion", "business_case", "critic", "alongside", "settled_all"]);
+  const FACT_KINDS = new Set(["buy", "switching", "h2h", "popular", "premium", "habit", ...DOUBT_KINDS, ...LAST_KINDS]);
   const PICK_KINDS = new Set(["buy", "switching"]);
   const sbF = selectionBook(set, book, data);
   const cellOfStat = (id: string) => {
@@ -1107,7 +1109,9 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
     const r = dest.indexOf("/rival:");
     return r >= 0 ? dest.slice(5, r) : dest.slice(5);
   };
+  /** Every card kind and every By rival page is built from facts (am80): each number is checked by its fact id. */
   const onFactCard = (id: string) => {
+    if (id.startsWith("rival:")) return true;
     const c = cellOfStat(id);
     return !!c && FACT_KINDS.has(kindOf(c) ?? "");
   };
@@ -1139,9 +1143,9 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
       const parts = id.slice(id.indexOf(")|") + 2).split("|");
       const t0 = parts.findIndex((x) => x.startsWith("t="));
       const scope = scopeOfParts(parts.slice(t0));
-      // The group's own ranking measure rides in its selection name ("competitors~ratified:rec" ranks by recommendations).
-      const rankBy = /^sel:competitors~ratified:rec$/.test(parts[0]) ? { rankBy: "recommended" as const } : {};
-      const members = sbF.selection("competitors", "you", scope, rankBy).members.map((x: any) => x.key);
+      // The group's own ranking measure and floor ride in its selection name ("competitors~ratified:rec:f5").
+      const q = parseSelectionId(`${parts[0]}|you|${parts.slice(t0).join("|")}`);
+      const members = sbF.selection("competitors", "you", scope, q?.opts ?? {}).members.map((x: any) => x.key);
       const per = members.map((k: string) => book.fact(m, k === T ? "you" : k, scope));
       const a = averageCompetitor(per, m, "ruled");
       return { k: a.k, n: a.n, text: printOf(MEASURE_BY_ID.get(m)!, a.k, a.n), id };
@@ -1366,13 +1370,101 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
     }
   };
 
+  /** The last slice's lists (am80: the remaining kinds and the By rival pages): every list carries a selection id; the
+   * id is recomputed from itself alone (name, parameters, subject, scope), and every drawn row is one of its members
+   * (a brand by its name, "You" for the tracker; a topic by its codebook name; a situation, AI company or question by
+   * its own label) - membership, and order where the list keeps the selection's order. */
+  const lastSelCheck = (where: string, sid: string, labels: string[], o: { order?: boolean; skip?: string[]; other?: boolean } = {}) => {
+    const listFail = (m: string) => factCards.failures.push(`${brand}: ${where}: list ${m}`);
+    factCards.lists++;
+    let q: any = parseSelectionId(sid);
+    if (!q) {
+      const p0 = parseSel(sid);
+      if (p0.name === "conditions_shown" || p0.name === "checklist" || p0.name === "vendors" || p0.name === "product_names" || p0.name === "product_picks" || p0.name === "competitors") {
+        const body = sid.slice(4);
+        const full = body.split("|")[0];
+        const param = full.includes("~") ? full.slice(full.indexOf("~") + 1) : "";
+        const opts: any = { ...p0.opts };
+        if (p0.name === "vendors") opts.min = Number(param);
+        if (p0.name === "product_names" || p0.name === "product_picks") {
+          const [b, t] = param.split(":");
+          opts.brand = b === "you" ? T : b;
+          opts.top = Number(t);
+        }
+        if (p0.name === "conditions_shown") {
+          const m = param.match(/^(toward|away):([a-z]+)(.*)$/);
+          if (!m) return listFail(`selection ${sid} cannot be read back`);
+          opts.side = m[1];
+          opts.flavor = m[2];
+          let rest = m[3];
+          if (rest.endsWith(":own")) {
+            opts.ownSplit = true;
+            rest = rest.slice(0, -4);
+          }
+          const ti = rest.indexOf(">to:");
+          if (ti >= 0) {
+            opts.to = rest.slice(ti + 4);
+            rest = rest.slice(0, ti);
+          }
+          if (rest.startsWith("@")) opts.towardOnly = rest.slice(1);
+        }
+        q = { name: p0.name, subject: p0.subject, scope: p0.scope, opts };
+      } else q = p0;
+    }
+    let sel: any;
+    try {
+      sel = sbF.selection(q.name, q.subject, q.scope, q.opts);
+    } catch (e: any) {
+      return listFail(`selection ${sid} cannot be recomputed: ${e.message}`);
+    }
+    if (sel.id !== sid) return listFail(`selection ${sid} recomputes under ${sel.id}`);
+    const namesOf = (m: any): string[] => {
+      if (m.label) return [m.label];
+      const k = String(m.key ?? "");
+      const prod = set.products?.get(k.startsWith("p:") ? k.slice(2) : k);
+      return [m.name, k, k === T ? "You" : "", prod?.full ?? "", prod?.short ?? ""].filter(Boolean);
+    };
+    // An "Other" row's names are the competitor group's other brands shown by name (extras.other.shown).
+    const members = (o.other ? sel.extras?.other?.shown ?? [] : sel.members).map(namesOf);
+    const indexOf = (l: string) => members.findIndex((ns: string[]) => ns.includes(l) || (!!codeOf(l) && ns.includes(codeOf(l)!)));
+    const shown = labels.filter((l) => !(o.skip ?? []).includes(l));
+    const missing = shown.filter((l) => indexOf(l) < 0);
+    if (missing.length) return listFail(`${where} rows [${missing.join(", ")}] not in selection ${sid} [${members.slice(0, 12).map((x: string[]) => x[0]).join(", ")}]`);
+    if (o.order) {
+      const idx = shown.map(indexOf);
+      if (idx.some((x, i) => i > 0 && x < idx[i - 1])) listFail(`${where} rows [${shown.join(", ")}] not in the selection's order`);
+    }
+  };
+  const walkLists = (where: string, x: any) => {
+    if (!x || typeof x !== "object") return;
+    if (Array.isArray(x)) return x.forEach((y, i) => walkLists(`${where}[${i}]`, y));
+    // A section / table / block / line with its selection.
+    if (typeof x.selection === "string" && x.selection.startsWith("sel:")) {
+      // A row that opens a question's card names that question type (the settled index).
+      const TYPE_OF: Record<string, string> = { expansion: "expansion", critic: "advocacy", alongside: "ecosystem", business_case: "business_case" };
+      const rowLabels: string[] = Array.isArray(x.rows)
+        ? x.rows.map((r: any) => (r.cell ? TYPE_OF[kindOf(r.cell) ?? ""] ?? r.label : r.label ?? r.name)).filter((l: any) => typeof l === "string" && l !== "Other")
+        : [];
+      if (rowLabels.length) lastSelCheck(`${where} "${x.title ?? ""}"`, x.selection, rowLabels, { other: /\.other$/.test(where) });
+    }
+    if (typeof x.itemsSelection === "string" && Array.isArray(x.items)) lastSelCheck(`${where} items`, x.itemsSelection, x.items.map((i: any) => i.label), { order: true });
+    if (typeof x.competitorSelection === "string" && Array.isArray(x.competitorOrder)) lastSelCheck(`${where} competitors`, x.competitorSelection, x.competitorOrder, { order: true });
+    if (x.selections && typeof x.selections === "object" && Array.isArray(x.toward) && Array.isArray(x.away)) {
+      if (x.selections.toward) lastSelCheck(`${where} conditions toward`, x.selections.toward, x.toward.map((r: any) => r.text));
+      if (x.selections.away) lastSelCheck(`${where} conditions away`, x.selections.away, x.away.map((r: any) => r.text));
+    }
+    for (const [k, v] of Object.entries(x)) if (k !== "refs" && k !== "num" && k !== "share") walkLists(`${where}.${k}`, v);
+  };
+  for (const [id, pos] of Object.entries<any>(map.positions)) if (pos.panel && LAST_KINDS.has(pos.panel.kind)) walkLists(id, pos.panel);
+  for (const rp of (map as any).rivalPanels ?? []) walkLists(`rival:${rp.name}`, rp);
+
   /** Every list on the fact-built cards is its selection. */
   {
     const sameL = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
     const listFail = (id: string, m: string) => factCards.failures.push(`${brand}: ${id}: list ${m}`);
     for (const [id, pos] of Object.entries<any>(map.positions)) {
       const pp = pos.panel;
-      if (!pp || !FACT_KINDS.has(pp.kind)) continue;
+      if (!pp || !FACT_KINDS.has(pp.kind) || LAST_KINDS.has(pp.kind)) continue;
       if (DOUBT_KINDS.has(pp.kind)) {
         checkStep3Lists(id, pp);
         continue;
@@ -2022,7 +2114,7 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
   failures.push(...local.unexplained.map((u) => `${brand}: ${u}`));
 }
 
-console.log(`\nSTEP 4 - the fact-built cards (What to buy every buyer and all buyers, Rivals' customers switching, every head-to-head, What's popular, Premium vs basic, Habit, Value, both worries, your customers looking around, and the rival cards inside them): ${factCards.stats} numbers with counts and ${factCards.sentence} sentence numbers checked by fact id - ${factCards.equal} equal to their fact exactly, ${factCards.failures.length} failures; ${factCards.lists} lists checked against their selection`);
+console.log(`\nSTEP 4 - the fact-built cards (every card kind - What to buy, switching, head-to-heads, What's popular, Premium vs basic, Habit, Value, both worries, looking around, Spotting the problem, Learning the category, What to look for, business case, expansion, alongside, answering a critic, the settled index - the rival cards inside them, and every By rival page): ${factCards.stats} numbers with counts and ${factCards.sentence} sentence numbers checked by fact id - ${factCards.equal} equal to their fact exactly, ${factCards.failures.length} failures; ${factCards.lists} lists checked against their selection`);
 console.log(`Product test (am43 / am44) in the fact layer's product grouping: ${productTestTotals.judged} names judged on six trackers, ${productTestTotals.differ} decided differently from the old test; ${productTestTotals.names} product names on the two cards and their rival cards checked against the grouping`);
 for (const l of productTestReport) console.log(`  ${l}`);
 for (const f of factCards.failures.slice(0, 40)) console.log(`  FACT-CARD ${f}`);

@@ -512,6 +512,8 @@ export interface PanelStep {
   here?: PanelNum;                     // you, in this cell (absent on segmented / list steps)
   segments?: PanelSegment[];           // a split bar (verdict steps)
   items?: { label: string; num: PanelNum }[]; // criteria checklist bars
+  /** The selection the items are (fact layer). Never drawn. */
+  itemsSelection?: string;
   note?: PanelText;                    // criteria "gap" sentence
   /** am45: what a term in the label means, behind a "?" (never a count). */
   help?: string;
