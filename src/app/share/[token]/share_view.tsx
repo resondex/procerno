@@ -5,7 +5,7 @@ import RunResults from "@/app/projects/[id]/run_results";
 
 /**
  * The public face of a shared dashboard: same results surface the owner
- * sees, read-only — running, deleting, scheduling, and dictionary editing
+ * sees, read-only - running, deleting, scheduling, and dictionary editing
  * are absent here and their APIs reject share sessions anyway.
  */
 export default function ShareView({
@@ -48,11 +48,11 @@ export default function ShareView({
     <main className="mx-auto max-w-6xl px-6 py-10 grid gap-6">
       <div>
         <h1 className="text-2xl font-semibold">
-          {brand} — LLM visibility
+          {brand}
         </h1>
         <p className="text-[13px] text-ink-3 mt-1">
-          Shared read-only dashboard · link expires{" "}
-          {new Date(expiresAt).toLocaleString()}
+          What AI assistants say about {brand}. Shared to read only - this link works until{" "}
+          {new Date(expiresAt).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" })}.
         </p>
       </div>
       {claimError ? (

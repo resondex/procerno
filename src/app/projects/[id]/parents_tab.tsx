@@ -171,7 +171,7 @@ export default function ParentsTab({
         key={b.id}
         draggable
         onDragStart={(e) => e.dataTransfer.setData("text/brand", b.id)}
-        className="inline-flex items-center rounded-full border border-line bg-white px-2.5 py-1 text-[13px] font-medium text-ink cursor-grab active:cursor-grabbing select-none"
+        className="inline-flex items-center rounded-full border border-line bg-surface px-2.5 py-1 text-[13px] font-medium text-ink cursor-grab active:cursor-grabbing select-none"
       >
         {b.display_name ?? b.canonical}
       </span>

@@ -1112,7 +1112,7 @@ function Modal({
       onClick={onClose}
     >
       <div
-        className={`card flex w-full ${wide ? "max-w-3xl" : "max-w-xl"} ${tall ? "h-[calc(100vh-3rem)]" : "max-h-[calc(100vh-3rem)]"} flex-col bg-white`}
+        className={`card flex w-full ${wide ? "max-w-3xl" : "max-w-xl"} ${tall ? "h-[calc(100vh-3rem)]" : "max-h-[calc(100vh-3rem)]"} flex-col bg-surface`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-start justify-between gap-4 p-6 pb-4">
@@ -1322,7 +1322,7 @@ function AnalysisSettings({
     return (
       <div
         key={e.id}
-        className={`grid grid-cols-[minmax(0,1.4fr)_auto_minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-line/60 py-2 text-sm ${!inAnalysis ? "opacity-60" : analyzed ? "" : "opacity-70"}`}
+        className={`grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b sm:grid-cols-[minmax(0,1.4fr)_auto_minmax(0,1fr)_auto_auto] border-line/60 py-2 text-sm ${!inAnalysis ? "opacity-60" : analyzed ? "" : "opacity-70"}`}
       >
         <div className="min-w-0 flex items-center gap-2">
           <span className={`truncate font-medium ${inAnalysis ? "" : "line-through text-ink-3"}`}>
@@ -1338,8 +1338,8 @@ function AnalysisSettings({
                 type="button"
                 title={
                   isCompetitor(e)
-                    ? "Tracked competitor — click to demote to discovered"
-                    : "Discovered by the model — click to track as a competitor"
+                    ? "Tracked competitor - click to demote to discovered"
+                    : "Discovered by the model - click to track as a competitor"
                 }
                 onClick={async () => {
                   await fetch(`/api/projects/${id}/dictionary`, {
@@ -1364,17 +1364,17 @@ function AnalysisSettings({
             )
           )}
         </div>
-        <span className={`w-20 text-right text-[10px] font-bold tracking-wide ${tier.cls}`}>
+        <span className={`hidden w-20 text-right text-[10px] font-bold tracking-wide sm:block ${tier.cls}`}>
           {tier.label}
         </span>
-        <div className="h-1 min-w-10 overflow-hidden rounded-full bg-line/60">
+        <div className="hidden h-1 min-w-10 overflow-hidden rounded-full bg-line/60 sm:block">
           <div
             className="h-full rounded-full bg-primary/50"
             style={{ width: `${Math.max(reach > 0 ? 4 : 0, (reach / maxReach) * 100)}%` }}
           />
         </div>
         <span
-          className="w-24 text-right text-xs text-ink-3"
+          className="hidden w-24 text-right text-xs text-ink-3 sm:block"
           title={e.aliases.slice(0, 12).join(", ") + (e.aliases.length > 12 ? ", …" : "")}
         >
           {e.aliases.length > 0 ? `${e.aliases.length} name form${e.aliases.length === 1 ? "" : "s"}` : ""}

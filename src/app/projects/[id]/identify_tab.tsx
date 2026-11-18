@@ -15,7 +15,7 @@ interface Pill {
   entryId: string; // entry that owns the name right now (server state)
   kind: "canonical" | "alias";
   homeStatus: DictionaryEntry["status"];
-  locked: boolean; // active canonicals anchor their bucket — not draggable
+  locked: boolean; // active canonicals anchor their bucket - not draggable
   confirmed: boolean;
   moved: boolean; // user dragged it this session → white
   /** Measured review rationale from the suggestion guard, when flagged. */
@@ -139,7 +139,7 @@ export default function IdentifyTab({
     );
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [suggesting, setSuggesting] = useState(false);
-  // Delayed indicator: cached suggestions resolve in <1s — flashing
+  // Delayed indicator: cached suggestions resolve in <1s - flashing
   // "Sorting…" for that beat reads as flicker, so it only shows when the
   // pass is genuinely slow.
   const [showSorting, setShowSorting] = useState(false);
@@ -179,7 +179,7 @@ export default function IdentifyTab({
     proposed: number;
     ignored: number;
   } | null>(null);
-  // Entry ids the suggestion pass has already placed — avoids re-suggesting.
+  // Entry ids the suggestion pass has already placed - avoids re-suggesting.
   const suggestedFor = useRef<Set<string>>(new Set());
   // The prefetched suggestion list serves exactly one pass - names that show
   // up after it was computed go through the endpoint like any other.
@@ -321,7 +321,7 @@ export default function IdentifyTab({
           .filter(
             (e) =>
               e.status === "rejected" &&
-              // Merge remnants live on as aliases elsewhere — one pill only.
+              // Merge remnants live on as aliases elsewhere - one pill only.
               !aliasOwners.has(matchKey(e.canonical)) &&
               e.canonical !== OTHER_CANONICAL
           )
@@ -649,7 +649,7 @@ export default function IdentifyTab({
       const src = prev.find((b) => b.pills.some((p) => p.norm === pillNorm));
       if (!src || src.key === toKey) return prev;
       const pill = src.pills.find((p) => p.norm === pillNorm)!;
-      // Dragging a group's anchor name takes the whole group with it — the
+      // Dragging a group's anchor name takes the whole group with it - the
       // grouping IS the anchor's entry, so its variants travel together.
       // A proposed new brand's anchor counts too: its collapsed variants
       // would otherwise stay behind, invisible, in a bucket that never
@@ -1084,7 +1084,7 @@ export default function IdentifyTab({
     0
   );
 
-  /** Drop handlers for a bucket — spread on the whole card so any point in
+  /** Drop handlers for a bucket - spread on the whole card so any point in
    * the box accepts the pill, not just the pill row. */
   function dropProps(toKey: string) {
     return {
@@ -1154,18 +1154,18 @@ export default function IdentifyTab({
               p.note
                 ? undefined
                 : isAnchor(p) && autos.length > 0
-                  ? "Group anchor — dragging it moves the whole group"
+                  ? "Group anchor - dragging it moves the whole group"
                   : p.confirmed && !p.moved
                     ? "Confirmed"
                     : p.moved
-                      ? "Moved — will be saved on confirm"
-                      : "New — needs your confirmation"
+                      ? "Moved - will be saved on confirm"
+                      : "New - needs your confirmation"
             }
             className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[13px] font-medium select-none ${
               p.locked ? "cursor-default" : "cursor-grab active:cursor-grabbing"
             } ${
               p.moved
-                ? "bg-white border-line text-ink"
+                ? "bg-surface border-line text-ink"
                 : p.confirmed
                   ? "bg-primary-soft border-primary/30 text-primary"
                   : "bg-danger/10 border-danger/30 text-danger"
@@ -1358,7 +1358,7 @@ export default function IdentifyTab({
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3">
           <span className="inline-flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-full bg-danger/60" /> new —
+            <span className="h-2.5 w-2.5 rounded-full bg-danger/60" /> new -
             confirm below
           </span>
           <span className="inline-flex items-center gap-1.5">
@@ -1366,12 +1366,12 @@ export default function IdentifyTab({
             confirmed
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-full border border-line bg-white" />{" "}
+            <span className="h-2.5 w-2.5 rounded-full border border-line bg-surface" />{" "}
             moved this session
           </span>
           <span className="inline-flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-full border border-amber-500/50 bg-amber-400/15" />{" "}
-            flagged for review — hover for why and click for examples
+            flagged for review - hover for why and click for examples
           </span>
         </div>
         {!hideConfirm && (
@@ -1413,7 +1413,7 @@ export default function IdentifyTab({
       {passDone && !suggesting && unplacedPending.length > 0 && (
         <div className="rounded-lg border border-dashed border-line p-3">
           <p className="text-xs text-ink-3 mb-2">
-            New names — drag into a group:
+            New names - drag into a group:
           </p>
           <div className="flex flex-wrap gap-1.5">
             {unplacedPending.map((e) => (
@@ -1485,11 +1485,11 @@ export default function IdentifyTab({
                 {examples.parent && (
                   <div>
                     <p className="section-label mb-1.5">
-                      Named alongside {examples.parent} —{" "}
+                      Named alongside {examples.parent} -{" "}
                       {examples.counts?.withParent.toLocaleString()} answers
                     </p>
                     {(examples.withParent ?? []).map((q, i) => (
-                      <p key={i} className="mb-1.5 rounded-lg border border-line bg-white/50 px-3 py-2 text-[13px] italic leading-snug text-ink-2">
+                      <p key={i} className="mb-1.5 rounded-lg border border-line bg-surface/50 px-3 py-2 text-[13px] italic leading-snug text-ink-2">
                         {highlight(q, examples.name, examples.embedding ?? [])}
                       </p>
                     ))}
@@ -1500,11 +1500,11 @@ export default function IdentifyTab({
                 )}
                 <div>
                   <p className="section-label mb-1.5">
-                    Named {examples.parent ? "without " + examples.parent : "in answers"} —{" "}
+                    Named {examples.parent ? "without " + examples.parent : "in answers"} -{" "}
                     {examples.counts?.alone.toLocaleString()} answers
                   </p>
                   {(examples.alone ?? []).map((q, i) => (
-                    <p key={i} className="mb-1.5 rounded-lg border border-line bg-white/50 px-3 py-2 text-[13px] italic leading-snug text-ink-2">
+                    <p key={i} className="mb-1.5 rounded-lg border border-line bg-surface/50 px-3 py-2 text-[13px] italic leading-snug text-ink-2">
                       {highlight(q, examples.name, examples.embedding ?? [])}
                     </p>
                   ))}
@@ -1541,7 +1541,7 @@ export default function IdentifyTab({
                   )
                 }
                 className="w-full bg-transparent text-sm font-semibold mb-2 outline-none border-b border-transparent focus:border-line"
-                title="Grouping label — used across all reports and dashboards"
+                title="Grouping label - used across all reports and dashboards"
               />
               {obs && (
                 <div className="mb-2 -mt-1 flex items-center gap-2">
@@ -1582,7 +1582,7 @@ export default function IdentifyTab({
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-ink-3 mb-2">
           Proposed new brands (
-          {buckets.filter((b) => b.kind === "new").length}) — each analyzes as
+          {buckets.filter((b) => b.kind === "new").length}) - each analyzes as
           its own brand
         </p>
         <div className="grid gap-2 sm:grid-cols-3">
@@ -1600,7 +1600,7 @@ export default function IdentifyTab({
                     )
                   }
                   className="w-full bg-transparent text-[13px] font-semibold mb-1.5 outline-none border-b border-transparent focus:border-line"
-                  title="Grouping label — used across all reports and dashboards"
+                  title="Grouping label - used across all reports and dashboards"
                 />
                 {bucketBody(b)}
               </div>
@@ -1626,8 +1626,8 @@ export default function IdentifyTab({
                 className="text-sm font-semibold mb-2 text-ink-2"
                 title={
                   b.kind === "other"
-                    ? "Grouped into the analysis as Other — label is fixed"
-                    : "Excluded from the analysis — raw data stays intact"
+                    ? "Grouped into the analysis as Other - label is fixed"
+                    : "Excluded from the analysis - raw data stays intact"
                 }
               >
                 {b.label}

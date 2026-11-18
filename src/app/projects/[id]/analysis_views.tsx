@@ -466,7 +466,7 @@ function Overview({
       <section className={sec}>
         <h2 className={`${T.h2} mb-1`}>What matters this wave</h2>
         <p className={`${T.sec} mb-4 max-w-[70ch]`}>
-          Each finding comes with its move. Add one to your playbook and it is marked on the Map.{barsOpen ? " Click a bar to see the answers." : ""}
+          Each finding comes with its move.{ctx.editable ? " Add one to your playbook and it is marked on the Map." : ""}{barsOpen ? " Click a bar to see the answers." : ""}
         </p>
         <div>
           {shownTensions.map((t) => {
