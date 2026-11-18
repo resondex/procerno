@@ -126,9 +126,12 @@ calculations that are supposed to match.
 | 10 | Conditions in the Overview's findings | Each question type on its own, so a finding matches the card it opens. |
 | 11 | "Converts" | One rule: the visibility view's (at or above the level line). |
 
-Ruling 8, the commit rate: it is the share of answers that pick one brand in analysis, so that "commits in X%, picked
-Y% of the time it does, Z% of all answers" still multiplies out. The shares "picks a brand outside of analysis" and
-"picks something outside the category" are shown beside it. (Confirm with Tyler: stated to him, not yet answered.)
+Confirmed by Tyler the same day:
+- **Commit rate** = the share of answers that pick one brand in analysis, so "commits in X%, picked Y% of the time it
+  does, Z% of all answers" multiplies out. "Outside of analysis" and "outside the category" are shown beside it.
+- **12. A pick outside the category is never "no single pick".** On "what happens to the recommendations" and every
+  list like it, the card shows it as "outside the category", its own share.
+- **13. Premium vs basic: an answer with no stance is its own share**, never added into "balanced".
 
 The list of every number each ruling moves, measured on the test copy of all six trackers: `RULING_MOVES_2026-11-17.md`
 (raw data in `~/Documents/procerno_eval/engine_inventory_2026-11-17/rulings/`). Ruling 7 moves 6,789 drawn numbers; under it
