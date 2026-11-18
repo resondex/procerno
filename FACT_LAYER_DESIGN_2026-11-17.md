@@ -86,7 +86,9 @@ Every list the product shows becomes a named selection with ONE rule:
   out. Listed rivals keep picks order on every block of the card. "Other": on "Who takes the picks" a real bar (picks
   add to 100%); on Named and Recommended a row with NO bar that only opens the list. Inside Other: brands named in at
   least 10% of answers or picked at least 5 times, each block sorted by its own number, anything smaller as one
-  "N more brands" line. The average competitor is the average of the listed rivals only, never a brand under Other;
+  "N more brands" line. The average competitor is ALL the listed rivals pooled (numerators over bases), head-to-head rivals with no picks
+  included (Tyler, after seeing that it lowers the benchmark: "All listed rivals"), never a brand under Other. Cards
+  where nothing is picked (Spotting the problem, Learning the category, worries, Value) keep their own list rules;
 - the leader in a buying situation, and how ties break;
 - the conditions shown for a side, and their order;
 - the AI's "what to look for" list;
