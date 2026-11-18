@@ -37,7 +37,6 @@ const rate = (c: RateCell) => (c.n > 0 ? c.k / c.n : 0);
 export const pctOf = (x: number) => (x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`);
 const pct = (c: RateCell) => pctOf(rate(c));
 const tipC = (c: RateCell) => `${c.k} of ${c.n}`;
-export const signedPts = (x: number) => `${x >= 0 ? "+" : "-"}${Math.round(Math.abs(x) * 100)} points`;
 const listVal = (xs: string[]) => xs.join(" · ");
 const conv = (b: { chosen: RateCell; recommended: RateCell }) => (b.recommended.k > 0 ? b.chosen.k / b.recommended.k : 0);
 type Row = { label: string; value: string; tip?: string };
@@ -50,14 +49,9 @@ const WATCH_ENGINE_SHARE = 0.4;
 
 export type Lift = { code: string; wins: RateCell; others: RateCell; lift: number };
 
-/** One lift line - shared with the map's open-choice cell (am10). */
-export function liftLine(l: Lift): string {
-  return `${l.code}: ${pct(l.wins)} of its picks, ${pct(l.others)} of other picks (${signedPts(l.lift)})`;
-}
-
 /* ---------------------------------- brand --------------------------------- */
 
-export interface CardSources {
+interface CardSources {
   summary: BrandSummaryView;
   inputs: InsightInputs;
   /** The tracker's own brand, as the project writes it. */
@@ -184,7 +178,7 @@ export function brandHeadline(name: string, b: SummaryBrand): string {
 /* The dossiers' per-brand argument lift (moved from brief_legacy_inputs.ts, unchanged): over the open-choice pool.
  * Share of answers arguing each code when `key` is picked vs when another in-category brand is, over the headline pool
  * (brand_summary's lift, for any brand). */
-export function liftForBrand(data: ViewData, request: ViewRequest, key: string): { code: string; wins: RateCell; others: RateCell; lift: number }[] {
+function liftForBrand(data: ViewData, request: ViewRequest, key: string): { code: string; wins: RateCell; others: RateCell; lift: number }[] {
   const resolve = buildResolver(data.dictionary, data.judged, data.names);
   const rows = poolOf(data, "headline", request).rows;
   const facts = rows.map(({ code }) => {

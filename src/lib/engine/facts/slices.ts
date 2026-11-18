@@ -67,8 +67,11 @@ import type { AnswerFact, AnswerFactSet, Bucket } from "./answer_facts";
 import { VERDICT_FIELDS, type VerdictField } from "./basics";
 import { isDefaultCondition } from "../condition_groups";
 import { famTokens } from "../brand_family";
-import { isDescription } from "../value";
+import { isDescription } from "../view_types";
 import { pluralNoun, productNoun } from "../panel_text";
+
+/** Markdown emphasis and surrounding punctuation off a quote, for grouping and display. */
+export const cleanQuote = (q: string) => q.replace(/\*\*?|__?|`/g, "").replace(/\s+/g, " ").trim().replace(/^[-:;,.\s]+|[:;,\s]+$/g, "");
 
 const BUCKETS = new Set(["none", "in_analysis", "outside_analysis", "outside_category"]);
 
@@ -131,6 +134,31 @@ function term(t: string, set: AnswerFactSet): Pred {
     }
     case "anybrand":
       return (f) => f.brands.some((b) => b.bucket === "in_analysis");
+    case "recany":
+      // Some brand the answer names is framed recommended in its text - any brand, in the category or not, the pick
+      // not counted (Question type detail's "recommends a product").
+      return (f) => f.brands.some((b) => b.framedRecommended);
+    case "pickdict": {
+      // A pick outside the category, by where the dictionary puts its name: rejected (ruled out on the board), pending
+      // (awaiting review) or unknown (not in the dictionary).
+      if (!set.statusOf) throw new Error(`fact layer: slice "${t}" needs the dictionary's statuses`);
+      const statusOf = set.statusOf;
+      return (f) => f.pick.state === "outside_category" && !!f.pick.key && statusOf(f.pick.key) === arg;
+    }
+    case "qgroup": {
+      // An adjacent-routed awareness answer's quote falls in that group of one grouping context ("<ctx>:<key>", each
+      // URI-encoded; type_detail.ts attachQuoteGroups).
+      const i = arg.indexOf(":");
+      const ctx = decodeURIComponent(arg.slice(0, i));
+      const key = decodeURIComponent(arg.slice(i + 1));
+      return (f) => f.qgroups?.[ctx] === key;
+    }
+    case "sentown":
+      // The answer sends the customer to another of the tracker's own products (destinations or redirects).
+      return (f) => (f.sent?.own.length ?? 0) > 0;
+    case "quoted":
+      // The answer carries a quote.
+      return (f) => cleanQuote(f.quote ?? "").length > 0;
     case "first": {
       const k = keyFn(arg, set);
       return (f) => f.brands.filter((b) => b.bucket === "in_analysis").sort((a, b) => a.order - b.order)[0]?.key === k(f);

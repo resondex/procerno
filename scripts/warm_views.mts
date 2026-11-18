@@ -7,7 +7,7 @@
  *   npx tsx scripts/warm_views.mts Sephora    # only trackers whose brand contains an argument
  *
  * Per tracker it computes brand_summary, analysis_map, dossiers, the
- * composed brief, the station reasons, the journey (and through it every
+ * composed brief, Question type detail (its sections bundle and the stations view - every
  * per-type view the Data page reads) and the workbench fact table through the same cached entry points the routes use, on the
  * run the dashboard shows (latest complete, else the latest coded run). A
  * warm cache answers in milliseconds; a miss computes and writes the cache
@@ -34,7 +34,9 @@ const { computeBrandSummaryCached } = await import(process.cwd() + "/src/lib/eng
 const { computeAnalysisMapCached } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
 const { computeDossiersCached } = await import(process.cwd() + "/src/lib/engine/dossiers.ts");
 const { computeBriefCached } = await import(process.cwd() + "/src/lib/engine/brief.ts");
-const { computeStationReasonsCached, computeJourney } = await import(process.cwd() + "/src/lib/engine/journey.ts");
+const { computeJourneyCached } = await import(process.cwd() + "/src/lib/engine/journey.ts");
+const { computeTypeDetailCached } = await import(process.cwd() + "/src/lib/engine/facts/type_detail.ts");
+const { computeHeadToHeadCached } = await import(process.cwd() + "/src/lib/engine/head_to_head.ts");
 const { computeWorkbenchCached } = await import(process.cwd() + "/src/lib/engine/workbench.ts");
 const { prewarmWrittenBriefs, writtenBriefsEntitled } = await import(process.cwd() + "/src/lib/engine/brief_writer.ts");
 
@@ -66,15 +68,12 @@ for (const pass of [1, 2] as const) {
       ["map", () => computeAnalysisMapCached(run, project)],
       ["dossiers", () => computeDossiersCached(run, project)],
       ["brief", () => computeBriefCached(run, project)],
-      // The Stations reasons blocks (j5, 2026-11-10) - all-buyers request; a
-      // room-filtered open computes its own suffix-keyed entry on first use.
-      ["stations", () => computeStationReasonsCached(run, project)],
-      // The Data page (2026-11-10): the journey view is not cached itself -
-      // it composes the cached per-type views (headline, awareness,
-      // head-to-head, alternatives, doubt, value, repertoire, premium,
-      // reasons, settled, summary, station reasons), so calling it the way
-      // the route does (no room, no engine subset) warms every one of them.
-      ["journey", () => computeJourney(run, project)],
+      // Question type detail (fact layer step 8): the per-type sections' bundle and the stations view, both cached
+      // views of the run's one fact book - all-buyers request; a room-filtered open computes its own entry on first use.
+      ["type_detail", () => computeTypeDetailCached(run, project)],
+      ["journey", () => computeJourneyCached(run, project)],
+      // The By rival panel's "when each side wins" boundaries (head_to_head.ts).
+      ["head_to_head", () => computeHeadToHeadCached(run, project)],
       // Build a table's fact table (wb).
       ["workbench", () => computeWorkbenchCached(run, project)],
     ] as const) {

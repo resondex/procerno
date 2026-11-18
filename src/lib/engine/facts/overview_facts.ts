@@ -22,15 +22,12 @@
  */
 import { matchKey } from "../../brand_key";
 import { ENGINES, engineDisplayLabel } from "../providers";
-import { roleOf } from "../headline";
+import { roleOf } from "../view_types";
 import { computeMemo, coreOf, facetsOf, type PoolRow, type ViewData, type ViewRequest } from "../view_data";
 import type { AnswerRef } from "../analysis_types";
 import type { BrandSummaryView, SummaryBrand, SummarySlice, ReasonLift } from "../brand_summary";
 import type { InsightInputs } from "../summary_insights";
-import type { ValueRow, ValueView, InsteadEntry, Worth } from "../value";
-import type { DoubtView, ObjectionVerdict, StayVerdict, WorryRow, Premise } from "../doubt";
-import type { AlternativesViews, CaptureRow, CaptorBrand, DestinationRow } from "../alternatives";
-import type { SettledViews, SettledBase } from "../settled";
+import type { ValueRow, ValueView, InsteadEntry, Worth, DoubtView, ObjectionVerdict, StayVerdict, WorryRow, Premise, AlternativesViews, CaptureRow, CaptorBrand, DestinationRow, SettledViews, SettledBase } from "../view_types";
 import { buildAnswerFacts, type AnswerFact, type AnswerFactSet, type QuestionType } from "./answer_facts";
 import { attachConditions } from "./conditions";
 import { factBook, WHAT_TO_BUY_ALL, type FactBook, type Scope } from "./fact";
@@ -506,7 +503,6 @@ function alternativesViews(data: ViewData, rf: RunFacts): AlternativesViews {
         leave: F("sent_to_any", "ai", { ...LA, when: "v:keep_or_leave:leave" }),
         undecided: F("sent_to_any", "ai", { ...LA, when: "v:keep_or_leave:undecided" }),
       },
-      exitsPerAnswer: 0,
       ownProduct: F("slice_share", "ai/slice:!pick:none&pick:you", LA),
       destinations,
       outsideDestinations: [],

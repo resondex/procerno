@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { ExitRow } from "@/lib/engine/exits";
-import type { DoubtSlice, DoubtView, DoubtViews, Premise, WorryRow } from "@/lib/engine/doubt";
+import type { DoubtSlice, DoubtView, DoubtViews, ExitRow, Premise, WorryRow } from "@/lib/engine/view_types";
 import { SortTable, Tip, type Col } from "./table";
-import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, ShareOf, StackBar, type Part, useEngineSet, viewQuery, EngineTable } from "./view_parts";
+import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, ShareOf, StackBar, type Part, typeDetailUrl, useEngineSet, viewQuery, EngineTable } from "./view_parts";
 
 /**
  * The doubt views (2026-10-27): objections (a buyer's worry before buying)
@@ -181,14 +180,13 @@ function ExitTable<V extends string>({ view, kind }: { view: DoubtView<V>; kind:
     },
     rateCol("offered", "Named", "Answers that name this brand as somewhere to go, over every answer in the view.", (d) => d.offered),
     ...kind.parts.map((p): Col<ExitRow<V>> => {
-      const n = view.verdicts[p.key].k;
-      return {
+            return {
         id: p.key,
         label: `On "${p.label.toLowerCase()}"`,
         tip: `Of the answers that ${p.label.toLowerCase()}, the share that name this brand.`,
         num: true,
-        val: (d) => (n > 0 ? Math.round((d.by[p.key] / n) * 1000) / 10 : null),
-        render: (d) => <ShareOf k={d.by[p.key]} n={n} />,
+        val: (d) => (d.by[p.key].n > 0 ? Math.round((d.by[p.key].k / d.by[p.key].n) * 1000) / 10 : null),
+        render: (d) => <ShareOf k={d.by[p.key].k} n={d.by[p.key].n} />,
       };
     }),
   ];
@@ -283,7 +281,7 @@ function DoubtSection<V extends string>({ view, kind }: { view: DoubtView<V>; ki
       )}
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine</summary>
-        <EngineTable cols={sliceCols(kind, "Engine")} rows={view.byEngine} filename={`${kind.csv}_by_engine.csv`} defaultSort={{ id: kind.good, dir: -1 }} />
+        <EngineTable cols={sliceCols(kind, "Engine")} rows={view.byEngine} groups={view.byEngineGroups} filename={`${kind.csv}_by_engine.csv`} defaultSort={{ id: kind.good, dir: -1 }} />
       </details>
       <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>
@@ -299,11 +297,11 @@ export default function DoubtSections({ runId, only }: { runId: string; only?: "
   const q = viewQuery({ engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/doubt${q}`)
+    fetch(typeDetailUrl(runId, "doubt", q))
       .then(async (r) => {
         if (!r.ok) throw new Error(`doubt view failed (${r.status})`);
-        const d = (await r.json()) as { views: DoubtViews | null };
-        if (live) setViews(d.views);
+        const d = (await r.json()) as { view: DoubtViews | null };
+        if (live) setViews(d.view);
       })
       .catch((e: Error) => live && setError(e.message));
     return () => {

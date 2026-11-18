@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { AwarenessBlock, AwarenessSlice, AwarenessView, Route, WithoutGroup } from "@/lib/engine/awareness";
+import type { AwarenessBlock, AwarenessSlice, AwarenessView, Route, WithoutGroup } from "@/lib/engine/view_types";
 import { SortTable, Tip, type Col } from "./table";
-import { AnswersModal, BaseNote, fmtN, Legend, pct, range, rate, rateCol, StackBar, type AnswersTarget, type Part, useEngineSet, viewQuery, EngineTable } from "./view_parts";
+import { AnswersModal, BaseNote, fmtN, Legend, pct, range, rate, rateCol, StackBar, type AnswersTarget, type Part, typeDetailUrl, useEngineSet, viewQuery, EngineTable } from "./view_parts";
 
 /**
  * The awareness views (2026-10-28): problem recognition (where the AI sends
@@ -76,10 +76,10 @@ function Lists({ b }: { b: AwarenessBlock }) {
             {b.brands.map((x) => (
               <li key={x.name} className="flex items-baseline justify-between gap-3">
                 <span className={x.you ? "font-medium text-ink" : "text-ink-2"}>{x.name}</span>
-                <Tip tip={`Named in ${range(x.named)}${x.recommended > 0 ? "; also recommended" : ""}`}>
+                <Tip tip={`Named in ${range(x.named)}${x.recommended.k > 0 ? "; also recommended" : ""}`}>
                   <span className="cursor-help tabular-nums text-ink-3">
                     {pct(x.named)}
-                    {x.recommended > 0 && " - recommended"}
+                    {x.recommended.k > 0 && " - recommended"}
                   </span>
                 </Tip>
               </li>
@@ -148,11 +148,11 @@ function Without({ b, runId, title }: { b: AwarenessBlock; runId: string; title:
           ))}
         </ul>
       )}
-      {(w.rest > 0 || w.noQuote > 0 || w.grouping === "stems") && (
+      {(w.rest.k > 0 || w.noQuote.k > 0 || w.grouping === "stems") && (
         <p className="mt-1.5 text-[12px] text-ink-3">
-          {(w.rest > 0 || w.noQuote > 0) && (
+          {(w.rest.k > 0 || w.noQuote.k > 0) && (
             <Tip
-              tip={[w.rest > 0 && `${w.rest} point their own way`, w.noQuote > 0 && `${w.noQuote} have no routing phrase`]
+              tip={[w.rest.k > 0 && `${w.rest.k} point their own way`, w.noQuote.k > 0 && `${w.noQuote.k} have no routing phrase`]
                 .filter(Boolean)
                 .join("; ")}
             >
@@ -207,6 +207,7 @@ function RoutingCard({ b, brand, category, runId }: { b: AwarenessBlock; brand: 
         <EngineTable
           cols={sliceCols("Engine", category, brand, "routing")}
           rows={b.byEngine}
+          groups={b.byEngineGroups}
           filename="problem_recognition_by_engine.csv"
           defaultSort={{ id: "category", dir: -1 }}
         />
@@ -245,6 +246,7 @@ function ExplainerCard({ b, brand, category, runId }: { b: AwarenessBlock; brand
         <EngineTable
           cols={sliceCols("Engine", category, brand, "explainer")}
           rows={b.byEngine}
+          groups={b.byEngineGroups}
           filename="category_education_by_engine.csv"
           defaultSort={{ id: "names", dir: -1 }}
         />
@@ -275,7 +277,7 @@ export default function AwarenessSections({
   const q = viewQuery({ room, engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/awareness${q}`)
+    fetch(typeDetailUrl(runId, "awareness", q))
       .then(async (r) => {
         if (!r.ok) throw new Error(`awareness view failed (${r.status})`);
         const d = (await r.json()) as { view: AwarenessView | null };

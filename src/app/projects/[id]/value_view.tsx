@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { ValueRow, ValueSlice, ValueView, Worth } from "@/lib/engine/value";
+import type { ValueRow, ValueSlice, ValueView, Worth } from "@/lib/engine/view_types";
 import { SortTable, Tip, type Col } from "./table";
-import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, StackBar, type Part, useEngineSet, viewQuery, EngineTable } from "./view_parts";
+import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, StackBar, type Part, typeDetailUrl, useEngineSet, viewQuery, EngineTable } from "./view_parts";
 
 /**
  * The Value view (2026-10-27): is the client's designed line worth it over a
@@ -25,10 +25,10 @@ const TIPS: Record<Worth, string> = {
 };
 
 const INSTEAD_TIP =
-  "Of the answers that say not worth it or depends, how many recommend a rival brand by name. The question names no rival, so these are cheaper options the AI puts forward on its own.";
+  "Of every answer, how many recommend a rival brand by name. The question names no rival, so these are cheaper options the AI puts forward on its own.";
 
 const OWN_TIP =
-  "Of the answers that say not worth it or depends, how many point to your own cheaper line or plan instead - the buyer stays with you, one rung down.";
+  "Of every answer, how many point only to your own cheaper line or plan instead - the buyer stays with you, one rung down.";
 
 const names = (xs: { name: string; n: number; own?: boolean }[]) =>
   xs.map((x) => (x.own ? `${x.name} (own)` : x.name)).join(", ");
@@ -73,7 +73,7 @@ export default function ValueSection({ runId, room }: { runId: string; room?: st
   const q = viewQuery({ room, engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/value${q}`)
+    fetch(typeDetailUrl(runId, "value", q))
       .then(async (r) => {
         if (!r.ok) throw new Error(`value view failed (${r.status})`);
         const d = (await r.json()) as { view: ValueView | null };
@@ -109,7 +109,7 @@ export default function ValueSection({ runId, room }: { runId: string; room?: st
         </Tip>
       </div>
       <p className="text-[13px] text-ink-2">
-        Of the doubts:{" "}
+        Of the answers:{" "}
         <Tip tip={`${OWN_TIP} ${range(view.ownRung)}`}>
           <span className="cursor-help font-semibold text-ink">{pct(view.ownRung)}</span>
         </Tip>{" "}
@@ -139,7 +139,7 @@ export default function ValueSection({ runId, room }: { runId: string; room?: st
       )}
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine</summary>
-        <EngineTable cols={engineCols} rows={view.byEngine} filename="value_by_engine.csv" defaultSort={{ id: "yes", dir: -1 }} />
+        <EngineTable cols={engineCols} rows={view.byEngine} groups={view.byEngineGroups} filename="value_by_engine.csv" defaultSort={{ id: "yes", dir: -1 }} />
       </details>
       <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>

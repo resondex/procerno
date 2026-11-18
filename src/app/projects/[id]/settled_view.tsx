@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import type { RateCell, SettledNamed, SettledViews } from "@/lib/engine/settled";
+import type { RateCell, SettledNamed, SettledViews } from "@/lib/engine/view_types";
 import { Tip } from "./table";
-import { pct, range, useEngineSet, viewQuery } from "./view_parts";
+import { pct, range, typeDetailUrl, useEngineSet, viewQuery } from "./view_parts";
 
 /**
  * The settled-customer verdict cards (RATIFIED 2026-11-01, decision 2):
@@ -73,7 +73,7 @@ export default function SettledSections({ runId }: { runId: string }) {
   const q = viewQuery({ engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/settled${q}`)
+    fetch(typeDetailUrl(runId, "settled", q))
       .then(async (r) => {
         if (!r.ok) throw new Error(`settled view failed (${r.status})`);
         const d = (await r.json()) as { view: SettledViews | null };

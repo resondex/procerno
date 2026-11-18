@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { RepertoireSlice, RepertoireView, Verdict } from "@/lib/engine/repertoire";
+import type { RepertoireSlice, RepertoireView, Verdict } from "@/lib/engine/view_types";
 import { Tip, type Col } from "./table";
-import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, StackBar, type Part, useEngineSet, viewQuery, EngineTable } from "./view_parts";
+import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, StackBar, type Part, typeDetailUrl, useEngineSet, viewQuery, EngineTable } from "./view_parts";
 
 /**
  * The repertoire view (2026-10-28): a habitual buyer of the client asks
@@ -49,7 +49,7 @@ export default function RepertoireSection({ runId }: { runId: string }) {
   const q = viewQuery({ engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/repertoire${q}`)
+    fetch(typeDetailUrl(runId, "repertoire", q))
       .then(async (r) => {
         if (!r.ok) throw new Error(`repertoire view failed (${r.status})`);
         const d = (await r.json()) as { view: RepertoireView | null };
@@ -124,7 +124,7 @@ export default function RepertoireSection({ runId }: { runId: string }) {
       </div>
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine</summary>
-        <EngineTable cols={engineCols(view.brand)} rows={view.byEngine} filename="repertoire_by_engine.csv" defaultSort={{ id: "stick", dir: -1 }} />
+        <EngineTable cols={engineCols(view.brand)} rows={view.byEngine} groups={view.byEngineGroups} filename="repertoire_by_engine.csv" defaultSort={{ id: "stick", dir: -1 }} />
       </details>
       <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>

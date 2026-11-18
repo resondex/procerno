@@ -10,7 +10,7 @@ import type {
   RateCell,
 } from "@/lib/engine/head_to_head";
 import { SortTable, Tip, type Col } from "./table";
-import { AnswersModal, BaseNote, fmtN, type AnswersTarget, useEngineSet, viewQuery, EngineTable, ReasonList, type ReasonRow } from "./view_parts";
+import { AnswersModal, BaseNote, fmtN, type AnswersTarget, typeDetailUrl, useEngineSet, viewQuery, EngineTable, ReasonList, type ReasonRow } from "./view_parts";
 import type { DossierTheme } from "@/lib/engine/reason_themes";
 
 /**
@@ -255,7 +255,7 @@ function ThemeDirection({
 /** One matchup's stated boundaries. `bare` (the brand dossiers, 2026-11-08):
  * no counts anywhere - no "(n)" per condition, no count tooltips, no "+N
  * more", no counts in the answers modal's subtitle. */
-export function Boundaries({ row, brand, onOpen, bare = false }: { row: HeadToHeadRow; brand: string; onOpen: OpenAnswers; bare?: boolean }) {
+export function Boundaries({ row, brand, onOpen, bare = false, ofAll = false }: { row: HeadToHeadRow; brand: string; onOpen: OpenAnswers; bare?: boolean; /** Question type detail: the shares are of every answer to the matchup (the card's condition rows). */ ofAll?: boolean }) {
   const c = row.conditions;
   if (!c) return null;
   const won = rate(row.won);
@@ -280,7 +280,7 @@ export function Boundaries({ row, brand, onOpen, bare = false }: { row: HeadToHe
           <div className="mt-2 grid gap-3 sm:grid-cols-2">
             <ThemeDirection
               label="You win when"
-              tip={`What the AI says about the buyer when it sends the pick to ${brand}. Each share is of the answers here that send the pick to ${brand} with a stated condition.`}
+              tip={`What the AI says about the buyer when it sends the pick to ${brand}. ${ofAll ? "Each share is of every answer to this matchup." : `Each share is of the answers here that send the pick to ${brand} with a stated condition.`}`}
               themes={c.themes.you}
               matchup={matchup}
               onOpen={onOpen}
@@ -288,7 +288,7 @@ export function Boundaries({ row, brand, onOpen, bare = false }: { row: HeadToHe
             />
             <ThemeDirection
               label="You lose when"
-              tip={`What the AI says about the buyer when it sends the pick to ${row.rival}. Each share is of the answers here that send the pick to ${row.rival} with a stated condition.`}
+              tip={`What the AI says about the buyer when it sends the pick to ${row.rival}. ${ofAll ? "Each share is of every answer to this matchup." : `Each share is of the answers here that send the pick to ${row.rival} with a stated condition.`}`}
               themes={c.themes.rival}
               matchup={matchup}
               onOpen={onOpen}
@@ -316,7 +316,7 @@ export function Boundaries({ row, brand, onOpen, bare = false }: { row: HeadToHe
           label="You win when"
           tip={`Reasons the AI states for routing the pick to ${brand}.${bare ? "" : " The number is how many answers state it."}`}
           groups={c.you}
-          more={c.youMore}
+          more={c.youMore ?? 0}
           routes={brand}
           matchup={matchup}
           onOpen={onOpen}
@@ -326,7 +326,7 @@ export function Boundaries({ row, brand, onOpen, bare = false }: { row: HeadToHe
           label="You lose when"
           tip={`Reasons the AI states for routing the pick to ${row.rival}.${bare ? "" : " The number is how many answers state it."}`}
           groups={c.rival}
-          more={c.rivalMore}
+          more={c.rivalMore ?? 0}
           routes={row.rival}
           matchup={matchup}
           onOpen={onOpen}
@@ -409,14 +409,14 @@ function KindSection({
           <p className="mt-2 text-[12px] text-ink-3">Click a reason to read the answers that state it.</p>
           <div className="mt-3 grid gap-3">
             {bounded.map((r) => (
-              <Boundaries key={r.key} row={r} brand={view.brand} onOpen={onOpen} />
+              <Boundaries key={r.key} row={r} brand={view.brand} onOpen={onOpen} ofAll />
             ))}
           </div>
         </details>
       )}
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine, across every {first.toLowerCase()}</summary>
-        <EngineTable cols={engineCols} rows={view.byEngine} filename={`head_to_head_${view.kind}_by_engine.csv`} defaultSort={{ id: "won", dir: -1 }} />
+        <EngineTable cols={engineCols} rows={view.byEngine} groups={view.byEngineGroups} filename={`head_to_head_${view.kind}_by_engine.csv`} defaultSort={{ id: "won", dir: -1 }} />
       </details>
       <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>
@@ -432,11 +432,11 @@ export default function HeadToHeadSection({ runId }: { runId: string }) {
   const q = viewQuery({ engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/head_to_head${q}`)
+    fetch(typeDetailUrl(runId, "head_to_head", q))
       .then(async (r) => {
         if (!r.ok) throw new Error(`head-to-head view failed (${r.status})`);
-        const d = (await r.json()) as { views: HeadToHeadViews | null };
-        if (live) setViews(d.views);
+        const d = (await r.json()) as { view: HeadToHeadViews | null };
+        if (live) setViews(d.view);
       })
       .catch((e: Error) => live && setError(e.message));
     return () => {

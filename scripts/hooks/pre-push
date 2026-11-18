@@ -1,0 +1,42 @@
+#!/bin/bash
+# Pre-push: run the full round of dashboard checks (scripts/check_all.sh) on the test copy and refuse the push when
+# any check fails. Installed by scripts/install_hooks.sh (a symlink into .git/hooks).
+#
+#   SKIP_CHECKS=1 git push    skips the checks (prints a warning) - for an emergency only.
+#
+# The checks read data/dashboard_fixture.db (a snapshot of live, scripts/build_live_snapshot.mts); without it the
+# hook fails rather than passing silently.
+ROOT="$(git rev-parse --show-toplevel)" || exit 1
+cd "$ROOT" || exit 1
+
+if [ "${SKIP_CHECKS:-}" = "1" ]; then
+  echo "" >&2
+  echo "############################################################" >&2
+  echo "##  WARNING: SKIP_CHECKS=1 - pushing WITHOUT the checks.  ##" >&2
+  echo "##  Nothing below was verified. Run scripts/check_all.sh  ##" >&2
+  echo "##  before the next push.                                 ##" >&2
+  echo "############################################################" >&2
+  echo "" >&2
+  exit 0
+fi
+
+if [ ! -f data/dashboard_fixture.db ]; then
+  echo "pre-push: data/dashboard_fixture.db is missing - the checks need the test copy." >&2
+  echo "pre-push: build it with: npx tsx scripts/build_live_snapshot.mts   (or push with SKIP_CHECKS=1 to skip, not advised)" >&2
+  exit 1
+fi
+
+echo "pre-push: running scripts/check_all.sh (about a minute)..." >&2
+out="$(scripts/check_all.sh 2>&1)"
+rc=$?
+echo "$out" >&2
+if [ $rc -ne 0 ]; then
+  first="$(echo "$out" | grep -m1 '^FAIL')"
+  echo "" >&2
+  echo "pre-push: push refused - a check failed:" >&2
+  echo "  $first" >&2
+  echo "pre-push: fix it, or push with SKIP_CHECKS=1 to skip the checks (not advised)." >&2
+  exit 1
+fi
+echo "pre-push: every check passed." >&2
+exit 0

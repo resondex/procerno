@@ -1,11 +1,9 @@
-import type { ValueView } from "./value";
-import type { DoubtViews, WorryRow } from "./doubt";
-import type { SettledViews } from "./settled";
+import type { ValueView, DoubtViews, WorryRow, SettledViews } from "./view_types";
 import { cell, facetsOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { isDefaultCondition } from "./condition_groups";
 import type { BrandSummaryView, VerdictFact } from "./brand_summary";
 import type { AnswerRef } from "./analysis_types";
-import type { AlternativesViews } from "./alternatives";
+import type { AlternativesViews } from "./view_types";
 import { ROW_NAME } from "./question_names";
 import { clearsMatchupGap } from "./matchup_gap";
 import type { MoveNames } from "./finding_moves";
@@ -143,9 +141,9 @@ import { inputsFromFacts, refsFor, sharedRunFacts, sitSlice, summaryFromFacts, w
  */
 
 export type InsightKind = "engine" | "room" | "rival" | "argument" | "doubt" | "funnel" | "question" | "value" | "switching" | "condition" | "leak";
-// "why" (2026-11-05) and "buyers" (2026-11-09) are retired pills: `look` is
-// consumed only by the unreferenced summary_views.tsx, so the targets stay as
-// written rather than paying a version bump to repoint a dead field.
+// "why" (2026-11-05) and "buyers" (2026-11-09) are retired pills: `look` has no
+// reader (summary_views.tsx, its last one, was deleted 2026-11-18), so the targets
+// stay as written rather than paying a version bump to repoint a dead field.
 export type InsightPill = "stations" | "why" | "rivals" | "buyers" | "table";
 
 export interface Insight {

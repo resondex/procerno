@@ -467,7 +467,8 @@ function ReasonsBlock({
     );
   const copy = REASON_COPY[s.key];
   const r = s.reasons;
-  if (r.win.base === 0 && r.lose.base === 0)
+  const blocks = s.reasonsByType;
+  if (blocks.length === 0)
     return (
       <div className="card p-5">
         <BlockTitle allBuyers={allBuyers}>The reasons</BlockTitle>
@@ -481,10 +482,16 @@ function ReasonsBlock({
         <Folded sentence={reasonsSentence(s.key, r)} onExpand={() => setOpen(true)} />
       ) : (
         <>
-          <div className="grid gap-5 md:grid-cols-2">
-            <ReasonSide title={copy.win} color={FOR_COLOR} side={r.win} onOpen={onOpen} />
-            <ReasonSide title={copy.lose} color={AGAINST_COLOR} side={r.lose} onOpen={onOpen} />
-          </div>
+          {/* One block per question type (a reason is counted inside one question type, ruling 10). */}
+          {blocks.map((b) => (
+            <div key={b.key} className="grid gap-2 [&+&]:mt-4">
+              {blocks.length > 1 && <h4 className="text-[12px] font-medium text-ink-2">{b.label}</h4>}
+              <div className="grid gap-5 md:grid-cols-2">
+                <ReasonSide title={copy.win} color={FOR_COLOR} side={b.reasons.win} onOpen={onOpen} />
+                <ReasonSide title={copy.lose} color={AGAINST_COLOR} side={b.reasons.lose} onOpen={onOpen} />
+              </div>
+            </div>
+          ))}
           <p className="mt-3 text-[11px] italic text-ink-3">{copy.note}</p>
         </>
       )}
@@ -595,7 +602,7 @@ function roomAware(key: StationKey, runId: string, roomKey: string): ReactNode {
       return (
         <>
           <HeadlineSection runId={runId} room={room} />
-          <ReasonsSection runId={runId} room={room} types={["headline", "headline:discovery", "headline:use_case", "headline:social_validation", "criteria_taught"]} initialType="criteria_taught" />
+          <ReasonsSection runId={runId} room={room} types={["headline", "headline:discovery", "headline:use_case", "social_validation", "premium_worth", "criteria_taught"]} initialType="criteria_taught" />
         </>
       );
     case "value":

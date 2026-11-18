@@ -64,14 +64,14 @@ export interface ElsewhereBrand {
 
 export interface MatchupConditions {
   /** All stated rules on this matchup's answers (before dedup). */
-  rules: number;
+  rules?: number;
   /** Answers whose decision_rules is [] - pure default answers. */
-  unconditional: number;
+  unconditional?: number;
   you: ConditionGroup[];
   /** Condition groups beyond the listed top of `you` / `rival`. */
-  youMore: number;
+  youMore?: number;
   rival: ConditionGroup[];
-  rivalMore: number;
+  rivalMore?: number;
   elsewhere: ElsewhereBrand[];
   /** hh8 (2026-11-12, the reasons harmonization): the same boundaries in the
    * run's reason themes (dt4, run_themes.ts), scoped to this matchup's
@@ -121,6 +121,10 @@ export interface HeadToHeadView {
   overall: { won: RateCell; lost: RateCell; other: RateCell; undecided: RateCell; winOfDecided: RateCell };
   rows: HeadToHeadRow[];
   byEngine: (HeadToHeadSlice & EngineFacets)[];
+  /** Question type detail (facts/type_detail.ts): the by-engine rows pooled by company / tier / mode, each a fact. */
+  byEngineGroups?: { vendor: (HeadToHeadSlice & EngineFacets)[]; tier: (HeadToHeadSlice & EngineFacets)[]; mode: (HeadToHeadSlice & EngineFacets)[] };
+  /** Question type detail: where each list's names come from (selection ids). */
+  sels?: Record<string, string[]>;
 }
 
 export interface HeadToHeadViews {

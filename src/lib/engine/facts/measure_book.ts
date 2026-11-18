@@ -311,6 +311,8 @@ const verdict = (id: string, name: string, legal: readonly QuestionType[], field
 
 export const MEASURES: readonly Measure[] = [
   /* -- brand measures -- */
+  // The answers in the scope (k = n): the base a table's "Answers" column and "Based on N answers" print.
+  { id: "answers", name: "Answers", subject: "ai", legal: ALL, base: all, hit: all, print: "whole" },
   { id: "named", name: "Named", subject: "brand", legal: ALL, base: all, hit: (f, c) => named(f, c), print: "whole" },
   { id: "recommended", name: "Recommended", subject: "brand", legal: ALL, base: all, hit: (f, c) => recommended(f, c), print: "whole" },
   { id: "picked", name: "Picked, of all answers", subject: "brand", legal: PICK_TYPES, base: all, hit: (f, c) => picks(f, c), print: "fine" },

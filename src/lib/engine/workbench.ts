@@ -1,6 +1,6 @@
 import { matchKey } from "../brand_key";
 import { ENGINES, engineDisplayLabel } from "./providers";
-import { roleOf } from "./headline";
+import { roleOf } from "./view_types";
 import { buildAnswerFacts, type AnswerFact } from "./facts/answer_facts";
 import { VERDICT_FIELDS, VERDICT_VALUES } from "./facts/basics";
 import { dataPoolOf } from "./facts/measure_book";

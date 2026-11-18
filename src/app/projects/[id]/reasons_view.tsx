@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { ReasonRow, ReasonTypeKey, ReasonsView } from "@/lib/engine/reasons";
+import type { ReasonRow, ReasonTypeKey, ReasonsView } from "@/lib/engine/view_types";
 import { SortTable, Tip, type Col } from "./table";
-import { BaseNote, fmtN, rate, rateCol, useEngineSet, viewQuery } from "./view_parts";
+import { BaseNote, fmtN, rate, rateCol, typeDetailUrl, useEngineSet, viewQuery } from "./view_parts";
 
 /**
  * The reasons view (2026-10-27): how often each confirmed reason code is
@@ -46,7 +46,7 @@ export default function ReasonsSection({
   const q = viewQuery({ room, engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/reasons${q}`)
+    fetch(typeDetailUrl(runId, "reasons", q))
       .then(async (r) => {
         if (!r.ok) throw new Error(`reasons view failed (${r.status})`);
         const d = (await r.json()) as { view: ReasonsView | null };
@@ -137,7 +137,8 @@ export default function ReasonsSection({
   }, [view, selected]);
 
   if (error) return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
-  if (!view || view.types.length === 0) return null;
+  // A station's scoped mount whose question kinds the tracker never asked shows nothing (not the every-type table).
+  if (!view || view.types.length === 0 || (types && offered.length === 0)) return null;
   const rows = grouped && view.groups ? view.groups : view.codes;
 
   return (
@@ -185,9 +186,9 @@ export default function ReasonsSection({
           out of the all-types column.
         </p>
       )}
-      {selected && selected.noReason > 0 && (
+      {selected && selected.noReason.k > 0 && (
         <p className="text-[12px] text-ink-3">
-          {Math.max(1, Math.round((selected.noReason / Math.max(1, selected.answers)) * 100))}% of these answers make no argument in
+          {Math.max(1, Math.round((selected.noReason.k / Math.max(1, selected.noReason.n)) * 100))}% of these answers make no argument in
           the codebook.
         </p>
       )}

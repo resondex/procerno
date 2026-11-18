@@ -242,6 +242,12 @@ export const useEngineSet = () => useContext(EngineSetContext);
 
 /** A view route's query string for the buyer filter and the engine set -
  * "" when neither is set, so an unfiltered fetch is exactly the old URL. */
+/** Question type detail's one route: a section of the fact layer's bundle (facts/type_detail.ts), with the view query
+ * (buyer filter, engine set) appended. */
+export function typeDetailUrl(runId: string, section: string, q: string): string {
+  return `/api/runs/${runId}/type_detail?section=${section}${q ? `&${q.replace(/^\?/, "")}` : ""}`;
+}
+
 export function viewQuery({ room, engines }: { room?: string | null; engines?: readonly string[] | null }): string {
   const q = new URLSearchParams();
   if (room) q.set("room", room);
@@ -365,11 +371,14 @@ const groupOf = (r: EngineRow, by: EngineGroupBy): { key: string; label: string 
 export function EngineTable<T extends EngineRow>({
   cols,
   rows,
+  groups,
   filename,
   defaultSort,
 }: {
   cols: Col<T>[];
   rows: T[];
+  /** The pooled rows as the server counted them (fact layer: each its own fact scope); absent = pooled here. */
+  groups?: { vendor: T[]; tier: T[]; mode: T[] };
   filename: string;
   defaultSort?: { id: string; dir: 1 | -1 };
 }) {
@@ -405,7 +414,7 @@ export function EngineTable<T extends EngineRow>({
   return (
     <div className="mt-2 grid gap-1">
       {toggle}
-      <GroupedTable cols={cols} rows={rows} by={by} filename={filename} defaultSort={defaultSort} />
+      <GroupedTable cols={cols} rows={rows} pooled={groups?.[by]} by={by} filename={filename} defaultSort={defaultSort} />
     </div>
   );
 }
@@ -413,12 +422,14 @@ export function EngineTable<T extends EngineRow>({
 function GroupedTable<T extends EngineRow>({
   cols,
   rows,
+  pooled,
   by,
   filename,
   defaultSort,
 }: {
   cols: Col<T>[];
   rows: T[];
+  pooled?: T[];
   by: Exclude<EngineGroupBy, "engine">;
   filename: string;
   defaultSort?: { id: string; dir: 1 | -1 };
@@ -433,7 +444,10 @@ function GroupedTable<T extends EngineRow>({
     b.members.push(r);
     buckets.set(g.key, b);
   }
-  const groups = [...buckets.entries()].map(([key, b]) => ({ key, members: b.members, row: poolSlices(b.members, key, b.label) }));
+  const groups = [...buckets.entries()].map(([key, b]) => {
+    const served = pooled?.find((r) => r.key === key);
+    return { key, members: b.members, row: served ? { ...served, label: b.label } : poolSlices(b.members, key, b.label) };
+  });
   const col = cols.find((c) => c.id === sort.id);
   const cmp = (a: T, b: T) => {
     if (!col) return 0;

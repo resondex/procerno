@@ -27,7 +27,7 @@ for (const line of fs.readFileSync(process.cwd() + "/.env.local", "utf8").split(
 
 const { store } = await import(process.cwd() + "/src/lib/store/index.ts");
 const { loadViewData } = await import(process.cwd() + "/src/lib/engine/view_data.ts");
-const { computeReasons } = await import(process.cwd() + "/src/lib/engine/reasons.ts");
+const { computeTypeDetail } = await import(process.cwd() + "/src/lib/engine/facts/type_detail.ts");
 const Anthropic = (await import("@anthropic-ai/sdk")).default;
 
 const MODEL = "claude-opus-5-5";
@@ -45,8 +45,9 @@ const project = (await store.listProjects()).find((p) => p.brand.toLowerCase().i
 if (!project) throw new Error(`no tracker matches ${want}`);
 const full = (await store.getProject(project.id))!;
 const run = (await store.listRuns(project.id))[0];
-const data = (await loadViewData(run, project))!;
-const view = computeReasons(data);
+const data = (await loadViewData(run, project, { setupDecision: true, codeGroups: true, judge: true }))!;
+// The arguments on the fact layer (Question type detail's reasons section).
+const view = (await computeTypeDetail(data)).reasons!;
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const proposal = JSON.parse(full.taxonomy_proposal ?? "{}") as { codes?: { code: string; why?: string }[] };

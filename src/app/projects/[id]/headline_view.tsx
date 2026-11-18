@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { HeadlineBrand, HeadlineSlice, HeadlineView, RateCell } from "@/lib/engine/headline";
+import type { HeadlineBrand, HeadlineSlice, HeadlineView, RateCell } from "@/lib/engine/view_types";
 import { SortTable, Tip, type Col } from "./table";
-import { BaseNote, fmtN, useEngineSet, viewQuery, EngineTable } from "./view_parts";
+import { BaseNote, fmtN, typeDetailUrl, useEngineSet, viewQuery, EngineTable } from "./view_parts";
 import { useDictionaryOpener } from "./dict_opener";
 
 /**
@@ -65,7 +65,9 @@ function RateText({ cell }: { cell: RateCell }) {
  */
 function DictionaryTodo({ view }: { view: HeadlineView }) {
   const openDictionary = useDictionaryOpener();
-  const { pending, ruledOut, notInDictionary } = view.picks;
+  const pending = view.picks.pending.k;
+  const ruledOut = view.picks.ruledOut.k;
+  const notInDictionary = view.picks.notInDictionary.k;
   // Spec wording: the first part says "picks", later parts continue it -
   // "<N> picks name brands awaiting ..., <M> name brands you ruled out, ...".
   const segs = [
@@ -114,7 +116,7 @@ function OutcomeBar({ view }: { view: HeadlineView }) {
           <div
             key={p.key}
             className={p.color}
-            style={{ width: `${(view.outcomes[p.key] / n) * 100}%` }}
+            style={{ width: `${(view.outcomes[p.key].k / n) * 100}%` }}
             title={p.label}
           />
         ))}
@@ -123,7 +125,7 @@ function OutcomeBar({ view }: { view: HeadlineView }) {
         {OUTCOME_PARTS.map((p) => (
           <span key={p.key} className="inline-flex items-center gap-1.5">
             <span className={`inline-block h-2.5 w-2.5 rounded-[3px] ${p.color}`} />
-            {p.label} {Math.round((view.outcomes[p.key] / n) * 100)}%
+            {p.label} {Math.round((view.outcomes[p.key].k / n) * 100)}%
           </span>
         ))}
       </div>
@@ -183,7 +185,7 @@ export default function HeadlineSection({ runId, room }: { runId: string; room?:
   const q = viewQuery({ room, engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/headline${q}`)
+    fetch(typeDetailUrl(runId, "headline", q))
       .then(async (r) => {
         if (!r.ok) throw new Error(`headline view failed (${r.status})`);
         const d = (await r.json()) as { view: HeadlineView | null };
@@ -207,7 +209,7 @@ export default function HeadlineSection({ runId, room }: { runId: string; room?:
   const brands = allBrands
     ? view.brands
     : view.brands.filter((b) => b.role !== "emerged" || rate(b.mentioned) >= 0.05);
-  const outside = view.picks.ruledOut + view.picks.pending + view.picks.notInDictionary;
+  const outside = view.picks.ruledOut.k + view.picks.pending.k + view.picks.notInDictionary.k;
   const stages = view.byStage.map((s) => ({ ...s, label: STAGE_LABEL[s.key] ?? s.key }));
 
   return (
@@ -217,14 +219,14 @@ export default function HeadlineSection({ runId, room }: { runId: string; room?:
         <p className="text-[13px] text-ink-3">
           <Tip tip="Open-choice questions on the core engine panel. Questions that name a brand are reported in their own views, never here.">
             <span className="cursor-help">
-              {stages.map((s) => s.label).join(", ")}. Questions that name a brand have their own views.
+              {stages.filter((s) => s.key === "discovery" || s.key === "use_case").map((s) => s.label).join(", ")}. What&apos;s popular and premium vs basic are their own rows below. Questions that name a brand have their own views.
             </span>
           </Tip>
           {view.uncoded > 0 && ` ${view.uncoded} answers are not coded yet.`}
         </p>
         {room && (
           <p className="text-[13px] text-ink-3 mt-1">
-            Only questions asked as this buyer: {room}. What's popular and premium vs basic are asked across all
+            Only questions asked as this buyer: {room}. What&apos;s popular and premium vs basic are asked across all
             buyers, so they are not in these numbers.
           </p>
         )}
@@ -284,7 +286,7 @@ export default function HeadlineSection({ runId, room }: { runId: string; room?:
 
       <section className="card p-6">
         <h2 className="section-label">{view.brand} by engine</h2>
-        <EngineTable cols={sliceCols("Engine")} rows={view.byEngine} filename="headline_by_engine.csv" defaultSort={{ id: "mentioned", dir: -1 }} />
+        <EngineTable cols={sliceCols("Engine")} rows={view.byEngine} groups={view.byEngineGroups} filename="headline_by_engine.csv" defaultSort={{ id: "mentioned", dir: -1 }} />
       </section>
       <BaseNote>
         Based on {fmtN(view.answers)} answers to questions that name no brand, across {view.byEngine.length} engines.

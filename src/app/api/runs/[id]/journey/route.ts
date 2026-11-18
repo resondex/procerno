@@ -3,8 +3,8 @@ import { requireAuth, requireRun } from "@/lib/auth";
 import { viewRequestParams } from "@/lib/engine/view_data";
 import { computeJourney } from "@/lib/engine/journey";
 
-/** The Journey map: six stations, each with its leak number, distilled from
- * the cached per-type views. { view: null } = no codes source yet.
+/** The Stations view (Question type detail): six stations, every number a fact
+ * from the run's one fact book, cached per (buyer filter, engine set). { view: null } = no codes source yet.
  * ?room=<situation> filters the room-pinned stations to that buyer; the
  * all-buyers measurements come back unfiltered and flagged invariant. */
 export async function GET(

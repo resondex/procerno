@@ -130,7 +130,11 @@ const EXPECTED: Record<string, string> = {
 };
 
 const want = (process.argv[2] ?? "").toLowerCase();
-const projects = (await store.listProjects()).filter((p: { brand: string; archived_at?: string | null }) => !p.archived_at && p.brand.toLowerCase().includes(want));
+const live = (await store.listProjects()).filter((p: { brand: string; archived_at?: string | null }) => !p.archived_at);
+// MAP_SHARD="i/N" (scripts/check_all.sh): this process checks every N-th tracker from the i-th (the trackers are
+// independent; the cross-tracker inputs below still read every tracker).
+const shard = (process.env.MAP_SHARD ?? "").match(/^(\d+)\/(\d+)$/);
+const projects = live.filter((p: { brand: string }, i: number) => p.brand.toLowerCase().includes(want) && (!shard || i % Number(shard[2]) === Number(shard[1])));
 const failures: string[] = [];
 const wallTable: string[] = [];
 /* am31: the panel checks' cross-tracker inputs and outputs. PANEL_BASELINE
@@ -140,7 +144,7 @@ const omissionLines: string[] = [];
 const payloadLines: string[] = [];
 const mockupLines: string[] = [];
 const categoryWords = new Map<string, string[]>(); // brand -> its category's words (4+ letters)
-for (const pr of projects) categoryWords.set(pr.brand, (pr.category as string).toLowerCase().match(/[a-z]{4,}/g) ?? []);
+for (const pr of live) categoryWords.set(pr.brand, (pr.category as string).toLowerCase().match(/[a-z]{4,}/g) ?? []);
 const PANEL_BANNED: [string, RegExp][] = [...BANNED, ["contest", /\bcontests?\b/i], ["cell", /\bcells?\b/i], ["pooled", /\bpooled\b/i], ["long dash", /[—–]/]];
 
 /* am35 F: no stacked bars. The panels' payload keeps its segments (each a

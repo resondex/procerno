@@ -140,6 +140,11 @@ export interface AnswerFact {
   /** The conditions it states, one statement per (unit, answer) - filled by attachConditions (conditions.ts) from the
    * run's saved grouping and themes; null = no decision rules on this answer (or not attached yet). */
   conds: CondStmt[] | null;
+  /** The coded quote (the phrase the answer's verdict rests on), as coded. */
+  quote?: string;
+  /** Question type detail's "how they solve it" groups of an adjacent-routed awareness answer's quote, one per grouping
+   * context (type_detail.ts attachQuoteGroups, from the run's saved grouping); absent = not attached. */
+  qgroups?: Record<string, string>;
 }
 
 /** The set of answer facts for one run, with the few tracker-level facts the measures need. */
@@ -151,6 +156,8 @@ export interface AnswerFactSet {
   bucketOf: (key: string) => Bucket;
   /** Entry id -> display name. */
   nameOf: (key: string) => string;
+  /** Entry id -> where the dictionary puts it ("active" / "rejected" / "pending"); "unknown" = no entry. */
+  statusOf?: (key: string) => "active" | "rejected" | "pending" | "unknown";
   /** A company's brands in analysis (the dictionary's parent, or the brand's own name when it has none) - the
    * subject "co:<company>". */
   companyMembers?: (company: string) => string[];
@@ -513,6 +520,7 @@ export function buildAnswerFacts(data: ViewData, opts: BuildOptions = {}): Answe
       pairings,
       rules,
       conds: null,
+      quote: c.quote ?? "",
     };
   }
 
@@ -520,5 +528,10 @@ export function buildAnswerFacts(data: ViewData, opts: BuildOptions = {}): Answe
   const inAnalysisKeys = [targetKey, ...dictionary.filter((e) => e.id !== targetKey && bucketOf(e.id) === "in_analysis").map((e) => e.id)];
   const companyOf = (key: string) => entryById.get(key)?.parent ?? nameOf(key);
   const companyMembers = (company: string) => inAnalysisKeys.filter((k) => companyOf(k) === company);
-  return { target: { key: targetKey, name: project.brand }, ladder, bucketOf, nameOf, companyMembers, resolve, facts };
+  const statusOf = (key: string): "active" | "rejected" | "pending" | "unknown" => {
+    if (key === targetKey) return "active";
+    const e = entryById.get(key);
+    return e ? (e.status === "active" || e.status === "rejected" || e.status === "pending" ? e.status : "unknown") : "unknown";
+  };
+  return { target: { key: targetKey, name: project.brand }, ladder, bucketOf, nameOf, statusOf, companyMembers, resolve, facts };
 }

@@ -44,7 +44,7 @@ import type { ViewData } from "../view_data";
 import type { AnswerFact, AnswerFactSet, QuestionType } from "./answer_facts";
 import { scopeKey, WHAT_TO_BUY_ALL, type FactBook, type Scope } from "./fact";
 import { MEASURE_BY_ID, PICK_TYPES } from "./measure_book";
-import { endItems, firstProductOf, pairingCounts, pairingProduct, firstSentOf, insteadProductsOf, ownOptionProductsOf, productsOf, sentProductsOf, slicePred } from "./slices";
+import { cleanQuote, endItems, firstProductOf, pairingCounts, pairingProduct, firstSentOf, insteadProductsOf, ownOptionProductsOf, productsOf, sentProductsOf, slicePred } from "./slices";
 
 /* ------------------------------- the shape ------------------------------- */
 
@@ -593,6 +593,10 @@ export interface SelectionOpts {
   brand?: string;
   /** pick_brands: the tracker first, then the others (Habit's "who gets it"). */
   youFirst?: boolean;
+  /** named_brands / rec_brands: the tracker kept in its place in the ranking. */
+  rankYou?: boolean;
+  /** quote_groups: the grouping's context (type_detail.ts). */
+  ctx?: string;
   /** cond_products: count products named and never picked too (the run's named products - nameProductOf). */
   named?: boolean;
   /** conditions_shown: move an away row whose products are mostly the tracker's own to the toward side (alongside). */
@@ -612,7 +616,7 @@ export interface SelectionOpts {
 }
 
 /** The selections whose parameters ride in their id as JSON ("~j{...}"): parseSelectionId reads them back. */
-const JSON_SELECTIONS = new Set(["topics_shown", "arg_lift", "named_brands", "first_named", "situations", "redirect_dests", "pairings", "first_pairing", "cond_cards", "case_args", "adjacent_names", "pick_args_diff", "question_types"]);
+const JSON_SELECTIONS = new Set(["sent_all", "sent_outside", "rec_brands", "arg_rank", "out_names", "quote_groups", "topics_shown", "arg_lift", "named_brands", "first_named", "situations", "redirect_dests", "pairings", "first_pairing", "cond_cards", "case_args", "adjacent_names", "pick_args_diff", "question_types"]);
 
 /** A selection id read back into its name, subject, scope and parameters (for a proof that recomputes it from the id
  * alone). Covers the JSON-parameter selections and the competitor group. */
@@ -1245,13 +1249,100 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
         out = { id, name: fullName, subject, scope, rule: `Every argument, with how often it comes up when the brand is the pick and when another brand in analysis is (ruling 2)${opts.lift === "summary" ? "; both sides 20 answers at least, and an argument in 2% of the answers" : ""}; largest lift first.`, members, extras: { base: wins.length } };
         break;
       }
+      case "sent_all":
+      case "sent_outside": {
+        // Question type detail: where the answers send the buyer - every brand in analysis (sent_all, by entry) or every
+        // name outside of analysis or the category (sent_outside, as written); most first (ties by name), top `top`
+        // (0 = every one).
+        const by = new Map<string, { name: string; ids: Set<string> }>();
+        for (const f of rows) {
+          // Outside names by the dictionary's name where it places them (an entry outside of analysis, ruled out or
+          // pending), else as written.
+          const xs = name === "sent_all" ? (f.sent?.brands ?? []).map((b) => ({ key: b.key, name: b.name })) : (f.sent?.outside ?? []).map((w) => set.resolve(w)).map((r) => ({ key: r.key, name: r.name.trim() }));
+          for (const x of xs) {
+            if (!x.name) continue;
+            const t0 = by.get(x.key) ?? { name: x.name, ids: new Set<string>() };
+            t0.ids.add(f.responseId);
+            by.set(x.key, t0);
+          }
+        }
+        const list = rank(by);
+        out = { id, name: fullName, subject, scope, rule: name === "sent_all" ? "Every brand in analysis the answers send the buyer to, most first, ties by name." : "Every name outside of analysis or the category the answers send the buyer to (the dictionary's name where it places one, else as written), most first, ties by name.", members: opts.top ? list.slice(0, opts.top) : list, extras: { base: rows.length } };
+        break;
+      }
+      case "rec_brands": {
+        // Question type detail: the brands in analysis the scope's answers (or a slice of them) recommend (a pick
+        // counting - ruling 6): `floor` answers at least, most first (ties by name); the tracker left out, or (youFirst)
+        // first; top `top` (0 = every one).
+        const rs = opts.slice ? rows.filter(slicePred(opts.slice, set)) : rows;
+        const list = rank(tally(rs, (f) => f.brands.filter((b) => b.bucket === "in_analysis" && b.recommended).map((b) => ({ key: b.key, name: b.key === T ? set.target.name : b.name })))).filter((m) => m.count >= (opts.floor ?? 0));
+        const you = list.filter((m) => m.key === T);
+        const all0 = opts.rankYou ? list : [...(opts.youFirst ? you : []), ...list.filter((m) => m.key !== T)];
+        const members = opts.top ? all0.slice(0, opts.top) : all0;
+        out = { id, name: fullName, subject, scope, rule: `The brands in analysis the answers recommend, a pick counting (${opts.floor ?? 0} answers at least), ${opts.youFirst ? "the tracker first, then " : "the tracker left out, "}most first, ties by name${opts.top ? `; top ${opts.top}` : ""}.`, members, extras: { base: rs.length } };
+        break;
+      }
+      case "arg_rank": {
+        // Question type detail: the arguments or topics the scope's answers (or a slice of them) raise, most first (ties by
+        // code), `floor` answers at least, top `top` (0 = every one). No code is left out for being obvious.
+        const rs = opts.slice ? rows.filter(slicePred(opts.slice, set)) : rows;
+        const by = new Map<string, { name: string; ids: Set<string> }>();
+        for (const f of rs)
+          for (const a of new Set(f.args ?? [])) {
+            const t0 = by.get(a) ?? { name: a, ids: new Set<string>() };
+            t0.ids.add(f.responseId);
+            by.set(a, t0);
+          }
+        const list = [...by.entries()].map(([key, x]) => ({ key, name: x.name, count: x.ids.size })).sort((a, b) => b.count - a.count || a.key.localeCompare(b.key)).filter((m) => m.count >= (opts.floor ?? 0));
+        out = { id, name: fullName, subject, scope, rule: `The arguments or topics the answers raise, ${opts.floor ?? 0} answers at least, most first (ties by code)${opts.top ? `; top ${opts.top}` : ""}.`, members: opts.top ? list.slice(0, opts.top) : list, extras: { base: rs.length } };
+        break;
+      }
+      case "out_names": {
+        // Question type detail: the names, as written, of the picks outside the category (or, with `slice`, of the picks
+        // in that slice), most first (ties by name), top `top` (0 = every one).
+        const rs = rows.filter(slicePred(opts.slice ?? "pick:outside_category", set));
+        const by = new Map<string, { name: string; ids: Set<string> }>();
+        for (const f of rs) {
+          // The dictionary's name where it places the pick (a ruled-out or pending entry), else as written.
+          const nm = f.pick.name ?? f.pick.written ?? "";
+          if (!nm) continue;
+          const t0 = by.get(nm) ?? { name: nm, ids: new Set<string>() };
+          t0.ids.add(f.responseId);
+          by.set(nm, t0);
+        }
+        const list = rank(by);
+        out = { id, name: fullName, subject, scope, rule: `The names of the picks outside the category (the dictionary's name where it places one, else as written), most first (ties by name)${opts.top ? `; top ${opts.top}` : ""}.`, members: opts.top ? list.slice(0, opts.top) : list, extras: { base: rs.length } };
+        break;
+      }
+      case "quote_groups": {
+        // Question type detail's "how they solve it": the groups the adjacent-routed answers' quotes fall in (the run's
+        // saved grouping, attached by type_detail.ts), each named by its most quoted wording (ties: the shorter); groups
+        // of two answers or more, most first (ties by name), top `top` (8).
+        const ctx = opts.ctx ?? "";
+        const rs = rows.filter((f) => f.verdicts.category_routed === "adjacent" && !!f.qgroups?.[ctx]);
+        const by = new Map<string, { ids: Set<string>; said: Map<string, number> }>();
+        for (const f of rs) {
+          const gk = f.qgroups![ctx]!;
+          const g = by.get(gk) ?? { ids: new Set<string>(), said: new Map<string, number>() };
+          g.ids.add(f.responseId);
+          const q = cleanQuote(f.quote ?? "");
+          g.said.set(q, (g.said.get(q) ?? 0) + 1);
+          by.set(gk, g);
+        }
+        const list = [...by.entries()]
+          .map(([key, g]) => ({ key, name: [...g.said.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0], count: g.ids.size }))
+          .filter((m) => m.count > 1)
+          .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+        out = { id, name: fullName, subject, scope, rule: "The groups the adjacent-routed answers' quotes fall in, named by their most quoted wording; two answers at least, most first, top eight.", members: list.slice(0, opts.top ?? 8), extras: { base: rs.length } };
+        break;
+      }
       case "named_brands": {
         // The brands in analysis the scope's answers (or a slice of them) name: `floor` answers at least, most first
         // (ties by name); the tracker left out, or (youFirst) first; top `top`.
         const rs = opts.slice ? rows.filter(slicePred(opts.slice, set)) : rows;
         const list = rank(tally(rs, (f) => f.brands.filter((b) => b.bucket === "in_analysis").map((b) => ({ key: b.key, name: b.key === T ? set.target.name : b.name })))).filter((m) => m.count >= (opts.floor ?? 0));
         const you = list.filter((m) => m.key === T);
-        const members = [...(opts.youFirst ? you : []), ...list.filter((m) => m.key !== T)].slice(0, opts.top ?? 5);
+        const members = (opts.rankYou ? list : [...(opts.youFirst ? you : []), ...list.filter((m) => m.key !== T)]).slice(0, opts.top ?? 5);
         out = { id, name: fullName, subject, scope, rule: `The brands in analysis the answers name (${opts.floor ?? 0} answers at least), ${opts.youFirst ? "the tracker first, then " : "the tracker left out, "}most first, ties by name; top ${opts.top ?? 5}.`, members, extras: { base: rs.length } };
         break;
       }

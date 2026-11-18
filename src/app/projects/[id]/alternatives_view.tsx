@@ -11,9 +11,10 @@ import type {
   HoldSlice,
   NamedCount,
   OffensiveView,
-} from "@/lib/engine/alternatives";
+  RateCell,
+} from "@/lib/engine/view_types";
 import { SortTable, Tip, type Col } from "./table";
-import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, ShareOf, StackBar, useEngineSet, viewQuery, EngineTable } from "./view_parts";
+import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, ShareOf, StackBar, typeDetailUrl, useEngineSet, viewQuery, EngineTable } from "./view_parts";
 
 /**
  * The alternatives views (2026-10-27): offensive capture (a rival's leaver
@@ -159,7 +160,7 @@ function OffensiveSection({ view }: { view: OffensiveView }) {
       </details>
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine, across every rival</summary>
-        <EngineTable cols={captureEngineCols} rows={view.byEngine} filename="alternatives_capture_by_engine.csv" defaultSort={{ id: "captured", dir: -1 }} />
+        <EngineTable cols={captureEngineCols} rows={view.byEngine} groups={view.byEngineGroups} filename="alternatives_capture_by_engine.csv" defaultSort={{ id: "captured", dir: -1 }} />
       </details>
       <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>
@@ -185,14 +186,13 @@ const HOLD_TIPS = {
 function DestinationTable({ view }: { view: DefensiveView }) {
   const [all, setAll] = useState(false);
   const rows = all ? view.destinations : view.destinations.filter((d) => d.role === "competitor" || rate(d.offered) >= 0.05);
-  const n = { keep: view.verdicts.keep.k, leave: view.verdicts.leave.k, undecided: view.verdicts.undecided.k };
-  const byVerdict = (id: "keep" | "leave" | "undecided", label: string, get: (d: DestinationRow) => number): Col<DestinationRow> => ({
+  const byVerdict = (id: "keep" | "leave" | "undecided", label: string, get: (d: DestinationRow) => RateCell): Col<DestinationRow> => ({
     id,
     label,
     tip: `Of the answers that ${label.toLowerCase()}, the share that name this brand as somewhere to go.`,
     num: true,
-    val: (d) => (n[id] > 0 ? Math.round((get(d) / n[id]) * 1000) / 10 : null),
-    render: (d) => <ShareOf k={get(d)} n={n[id]} />,
+    val: (d) => (get(d).n > 0 ? Math.round((get(d).k / get(d).n) * 1000) / 10 : null),
+    render: (d) => <ShareOf k={get(d).k} n={get(d).n} />,
   });
   const cols: Col<DestinationRow>[] = [
     {
@@ -207,9 +207,9 @@ function DestinationTable({ view }: { view: DefensiveView }) {
       ),
     },
     rateCol("offered", "Pointed to", HOLD_TIPS.offered, (d) => d.offered),
-    byVerdict("keep", "Advise staying", (d) => d.onKeep),
-    byVerdict("leave", "Advise leaving", (d) => d.onLeave),
-    byVerdict("undecided", "Take no side", (d) => d.onUndecided),
+    byVerdict("keep", "Advise staying", (d) => d.by!.keep),
+    byVerdict("leave", "Advise leaving", (d) => d.by!.leave),
+    byVerdict("undecided", "Take no side", (d) => d.by!.undecided),
   ];
   return (
     <div className="grid gap-2">
@@ -260,7 +260,7 @@ function DefensiveSection({ view }: { view: DefensiveView }) {
         <Tip tip={`${HOLD_TIPS.leave} ${range(view.verdicts.leave)}`}>
           <span className="cursor-help">{pct(view.verdicts.leave)} advise leaving</span>
         </Tip>
-        <Tip tip={`${HOLD_TIPS.offersExit} ${view.exitsPerAnswer.toFixed(1)} brands on average. ${range(view.offersExit)}`}>
+        <Tip tip={`${HOLD_TIPS.offersExit} ${range(view.offersExit)}`}>
           <span className="cursor-help">{pct(view.offersExit)} point to another brand</span>
         </Tip>
       </div>
@@ -285,7 +285,7 @@ function DefensiveSection({ view }: { view: DefensiveView }) {
       )}
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine</summary>
-        <EngineTable cols={holdEngineCols} rows={view.byEngine} filename="alternatives_hold_by_engine.csv" defaultSort={{ id: "keep", dir: -1 }} />
+        <EngineTable cols={holdEngineCols} rows={view.byEngine} groups={view.byEngineGroups} filename="alternatives_hold_by_engine.csv" defaultSort={{ id: "keep", dir: -1 }} />
       </details>
       <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>
@@ -301,11 +301,11 @@ export default function AlternativesSection({ runId, only }: { runId: string; on
   const q = viewQuery({ engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/alternatives${q}`)
+    fetch(typeDetailUrl(runId, "alternatives", q))
       .then(async (r) => {
         if (!r.ok) throw new Error(`alternatives view failed (${r.status})`);
-        const d = (await r.json()) as { views: AlternativesViews | null };
-        if (live) setViews(d.views);
+        const d = (await r.json()) as { view: AlternativesViews | null };
+        if (live) setViews(d.view);
       })
       .catch((e: Error) => live && setError(e.message));
     return () => {
