@@ -643,16 +643,19 @@ function PanelShell({ label, onClose, children }: { label: string; onClose: () =
         role="dialog"
         aria-modal="true"
         aria-label={label}
-        className="pa-panel fixed inset-y-0 right-0 z-[45] w-full max-w-[580px] overflow-y-auto overflow-x-hidden border-l border-line bg-surface px-5 pb-10 pt-5 shadow-2xl sm:px-6"
+        className="pa-panel fixed inset-y-0 right-0 z-[45] w-full max-w-[580px] overflow-y-auto overflow-x-hidden border-l border-line bg-surface px-5 pb-10 shadow-2xl sm:px-6"
       >
-        <button
-          ref={closeRef}
-          type="button"
-          onClick={onClose}
-          className="sticky top-0 float-right ml-3 rounded-lg border border-line bg-surface px-2.5 py-0.5 text-[13px] text-ink-2 hover:text-ink"
-        >
-          Close
-        </button>
+        {/* A full-width strip, so a row scrolling under it is covered whole and no number is half hidden by the button. */}
+        <div className="sticky top-0 z-10 -mx-5 mb-3 flex justify-end border-b border-line/60 bg-surface px-5 py-2 sm:-mx-6 sm:px-6">
+          <button
+            ref={closeRef}
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-line bg-surface px-2.5 py-0.5 text-[13px] text-ink-2 hover:text-ink"
+          >
+            Close
+          </button>
+        </div>
         {children}
       </aside>
     </>
