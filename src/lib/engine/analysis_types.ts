@@ -46,6 +46,8 @@ export interface MapCell {
   exception?: true;
   /** Answers behind the cell (the tooltip's denominator). */
   n: number;
+  /** Statements (fact layer): where each number of `note` sits, with its fact id. Never drawn. */
+  facts?: Record<string, [number, number, string][]>;
 }
 
 export interface MapRow {
@@ -73,6 +75,8 @@ export interface CastingLine {
   casting: string;
   /** One supporting sentence with the two or three numbers behind it. */
   detail: string;
+  /** Statements: where each number of `casting` / `detail` sits, with its fact id. Never drawn. */
+  facts?: Record<string, [number, number, string][]>;
 }
 
 export type Triage =
@@ -145,6 +149,8 @@ export interface PositionException {
   /** Counts for the tooltip. */
   tip: string;
   rows: ExceptionItem[];
+  /** The share of the answers that pick the rival that still state a case for you (0-1) - the wording's "most" test. */
+  lostRate?: number;
 }
 
 /** One brand's share of a pick contest (Position.brands). */
@@ -335,6 +341,8 @@ export interface Position {
    * route leaves the panel bodies out; the slide-over loads one cell's panel
    * (its rivals included) from /api/runs/[id]/cell_panel when it opens. */
   panelStub?: PanelStub;
+  /** Statements: where each number of `claim`, `figures.<i>` and `triageWhy` sits, with its fact id. Never drawn. */
+  facts?: Record<string, [number, number, string][]>;
 }
 
 /** The one payload the Map and Verdict tabs read (positions ride along so
@@ -342,7 +350,7 @@ export interface Position {
 export interface AnalysisMapView {
   casting: CastingLine;
   /** The brand's two-dot line and who-wins-instead bars (open choice). */
-  dots: { named: RateCell; picked: RateCell };
+  dots: { named: RateCell; picked: RateCell; /** am81: the commit rate - the share of answers that pick one brand in analysis (a fact; the page reads it, never works it out). */ commit?: RateCell };
   /** am19 (2026-11-11): the Overview's headline numbers open their answers -
    * up to 5 each, spread across assistants. named = open-choice answers that
    * name the brand; commits = answers that commit to one in-category pick
@@ -375,10 +383,14 @@ export interface AnalysisMapView {
       /** am19: the answers behind the bar's numerator, when the finding has them in hand. */
       refs?: AnswerRef[];
       /** am62: whose number - you (blue), a named rival (pink), anything else (grey). */
+      /** The fact the bar prints (never drawn). */
+      fact?: string;
       who?: "you" | "rival" | "other";
     }[];
     /** bs23 (2026-11-13): an unasked_rival finding's rival (dictionary entry
      * key + name) - the Overview card offers "Ask this matchup" for it. */
+    /** Statements: where each number of the title, body and bars sits, with its fact id. Never drawn. */
+    facts?: Record<string, [number, number, string][]>;
     matchup?: { key: string; name: string };
   }[];
   bands: MapBand[];

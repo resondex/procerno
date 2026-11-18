@@ -328,7 +328,8 @@ function Overview({
   const companyMode = byCompany && hasCompanies;
   const you = map.shareOfDecided.find((s) => s.you);
   const named = map.dots.named;
-  const commit: RateCell | null = you && map.dots.picked.n > 0 ? { k: you.share.n, n: map.dots.picked.n, low: 0, high: 0 } : null;
+  // The commit rate is the engine's fact (am81) - the page never works it out.
+  const commit: RateCell | null = map.dots.commit ?? null;
   const shareX = (s: RateCell) => (s.n > 0 ? s.k / s.n : 0);
   const max = Math.max(0.0001, ...map.shareOfDecided.map((s) => shareX(s.share)));
   const playbook = Object.values(map.positions).filter((p) => mine.has(p.cellId));

@@ -4,7 +4,7 @@ import { awaySpecifics, destOf, destPhrase, pctFine, type InsightInputs } from "
 import { cell, poolOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { Position } from "./analysis_types";
 import { buildResolver } from "./brand_resolve";
-import { liftForBrand } from "./analysis_map";
+import { liftForBrand } from "./brief_legacy_inputs";
 import { productNoun } from "./summary_insights";
 import { isDefaultCondition } from "./condition_groups";
 

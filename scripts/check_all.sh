@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.." || exit 1
 OUT="${OUT:-${TMPDIR:-/tmp}/procerno_checks}"
 mkdir -p "$OUT"
 
-names=(types registry links citation panels map fixture serve facts)
+names=(types registry links citation panels map fixture serve facts statements)
 cmd_types="npx tsc --noEmit -p ."
 cmd_registry="npx tsx scripts/stat_registry_harness.mts"
 cmd_links="npx tsx scripts/brief_links_harness.mts"
@@ -20,6 +20,7 @@ cmd_panels="npx tsx scripts/panel_synthetic_test.mts"
 cmd_map="npx tsx scripts/analysis_map_harness.mts"
 cmd_fixture="npx tsx scripts/checker_fixture.mts"
 cmd_facts="npx tsx scripts/fact_layer_harness.mts"
+cmd_statements="npx tsx scripts/statements_harness.mts"
 # serve_logic_harness builds its own temporary store: SQLITE_PATH must not be set for it.
 cmd_serve="env -u SQLITE_PATH npx tsx scripts/serve_logic_harness.mts"
 

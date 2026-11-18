@@ -78,6 +78,123 @@ export const FLOORS = {
   apartZ: 1.96,
 } as const;
 
+/**
+ * The Overview's findings and the Map's cells (statements, layer 4) read their floors from here - each value as the
+ * detector or cell used it before it moved onto the fact layer (nothing silently changed). Where two places use
+ * different floors for the same idea, both stay and the conflict is listed in CONFLICTS below.
+ */
+export const OVERVIEW_FLOORS = {
+  /** Both ends of a spread, every finding's base (MIN_BASE). */
+  minBase: 20,
+  /** The served list: at most this many findings; a rank-fill slot needs this effect. */
+  maxInsights: 12,
+  fillMinEffect: 0.3,
+  /** prompted_vs_open: the gap between matchups won and the open share of picks. */
+  promptedGap: 0.15,
+  /** The verdict's prompted-vs-open sentence: "ahead / behind / in line" at this gap. */
+  verdictPromptedGap: 0.1,
+  /** pick_concentration_room: one buying situation holds this share of your picks. */
+  roomConcentration: 0.5,
+  /** pick_concentration_question: one question holds this share of a brand's picks. */
+  questionConcentration: 0.3,
+  /** agreed_yet_stay: agrees at least this often, and still says go ahead / stay at least this often among those. */
+  agreedShare: 0.5,
+  agreedGiven: 0.3,
+  /** value_in_house: own option or a rival at least this share. */
+  valueSide: 0.3,
+  /** The verdict's value sentence: "most" at this share, a two-part sentence at valueSide. */
+  valueMost: 0.5,
+  /** advocacy_vs_objection: both sides at least this share. */
+  advocacyShare: 0.5,
+  /** leaver_capture: named in this share of leavers' answers and picked under leaverNever. */
+  leaverNamed: 0.5,
+  leaverNever: 0.05,
+  /** own_defense: an exit shown in this share, stay under it; exits within tiedPts of the top are named with it. */
+  ownDefenseShown: 0.5,
+  ownDefenseTiedPts: 0.05,
+  /** away_condition: its lead row needs this many answers (the themed path's MIN_BASE) ... */
+  awayLeadMin: 20,
+  /** ... and a specific wording (a blocker brand, a fixed situation) this many (was 15 grouped rules). */
+  awaySpecificMin: 15,
+  /** A brand the AI almost never picks (the blocker clause). */
+  blockerShare: 0.02,
+  /** assigned_exception: the exception in this many lost answers and this share of them. */
+  excMinAnswers: 15,
+  excMinShare: 0.2,
+  /** engine_h2h_flip: the open-choice gap by mode a flip must run against. */
+  flipMinOpen: 0.05,
+  /** engine_pick_concentration: one assistant or company supplies this share of a brand's picks; 3 assistants at least. */
+  engineConcShare: 0.4,
+  engineConcMinEngines: 3,
+  /** vendor_outlier: a gap this large against the others pooled; 3 companies with minBase answers. */
+  vendorMinGap: 0.1,
+  vendorMinCompanies: 3,
+  /** neutralized_differentiator: an argument in this share of your matchup wins. */
+  ndWinShare: 0.4,
+  /** leak_picks: picks outside the category at this share; leak_problem: problem questions at this share. */
+  leakPicksShare: 0.1,
+  leakProblemShare: 0.5,
+  /** leave_no_exit: leave answers naming nowhere at this share. */
+  noExitShare: 0.5,
+  /** The argument lift (the reasonLift list): 20 answers a side, an argument in 2% of the pool. */
+  liftMinAnswers: 20,
+  liftMinIncidence: 0.02,
+} as const;
+
+/** The Map's cell floors (analysis_map.ts), as they were. */
+export const MAP_FLOORS = {
+  /** A cell's side-taking denominator below this is "no side taken" (MIN_SIDE). */
+  minSide: 20,
+  /** Overlapping ranges: both sides at least this share is contested (MATERIAL). */
+  material: 0.15,
+  /** Badges: picks outside the category, own cheaper option, one assistant. */
+  leakShare: 0.1,
+  inhouseShare: 0.5,
+  watchEngineShare: 0.4,
+  watchEngineMin: 10,
+  /** A cell's lift list: 10 answers a side, an argument in 5% of the two sides, top 8. */
+  liftMin: 10,
+  liftMinIncidence: 0.05,
+  liftTop: 8,
+  /** A fixed situation on the away side needs this many answers. */
+  wallMin: 5,
+  /** Casting: "leads" within this margin of the top brand's share of picks. */
+  defaultMargin: 0.05,
+  /** Position.brands: a brand with this many picks in the contest is listed; at most 5. */
+  brandFloor: 5,
+  brandsTop: 5,
+  /** The arguments block when there is no lift: 10 answers, top 5. */
+  argsMin: 10,
+  argsTop: 5,
+  /** Lost with an exception: 20 lost answers, half of them still stating a case for you. */
+  excMinLost: 20,
+  excMinShare: 0.5,
+  /** The exit taker on a worry: at least this many answers and this share. */
+  exitMin: 3,
+  exitShare: 0.2,
+  /** The settled cells' redirect taker. */
+  redirectShare: 0.1,
+  /** The criteria cell's what-to-buy lift for one buyer: 10 picks a side. */
+  roomLiftMin: 10,
+} as const;
+
+/**
+ * Floors that differ for the same idea (kept as they are, listed for the ruling):
+ *  - "an argument comes up more when you win": the Overview's lift needs 20 answers a side and 2% incidence
+ *    (liftMinAnswers / liftMinIncidence); a Map cell's lift needs 10 a side and 5% (MAP_FLOORS.liftMin /
+ *    liftMinIncidence); a buyer's criteria cell reads 10 picks a side (roomLiftMin) with no incidence floor.
+ *  - "one assistant supplies the picks": the Map's watch badge (40% of the cell's brand side, 10 answers) and the
+ *    Overview's finding (40% of a brand's picks, 20 picks, 3 assistants, the range clearing the assistant's share of
+ *    questions).
+ *  - "a fixed situation": the Map's wall needs 5 answers on the row (wallMin); the Overview's away finding needs 15 on a specific
+ *    wording (awaySpecificMin).
+ *  - the exit / redirect taker: 3 answers and 20% on a worry (exitShare), 3 answers and 10% on a settled cell
+ *    (redirectShare).
+ *  - "lost with an exception": the Map cell needs 20 lost answers and half of them stating a case for you; the
+ *    Overview's finding needs 15 answers stating its one condition and 20% of the lost answers.
+ */
+export const FLOOR_CONFLICTS = true;
+
 /* ------------------------------- types ------------------------------- */
 
 /** "ai" = the measure is about the answer, not a brand; "rival" = each answer's own named rival (head-to-heads,

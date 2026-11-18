@@ -1,25 +1,20 @@
-import { computeHeadline } from "./headline";
-import { computeValue, type ValueView } from "./value";
-import { computeDoubt, type DoubtViews, type WorryRow } from "./doubt";
-import { computeSettled, type SettledViews } from "./settled";
-import { computeReasons } from "./reasons";
-import { buildResolver } from "./brand_resolve";
-import { containsSeq, famTokens } from "./brand_family";
-import { computeAlternatives, type AlternativesViews } from "./alternatives";
-import type { RuleGroup } from "./rules_explorer";
+import type { ValueView } from "./value";
+import type { DoubtViews, WorryRow } from "./doubt";
+import type { SettledViews } from "./settled";
+import { cell, facetsOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { isDefaultCondition } from "./condition_groups";
-import { anyException, exceptionRefs, exceptionRows, lostOnBalance } from "./assigned_exception";
-import { sharedRunThemes, themeRollup, type ThemeRollup } from "./run_themes";
-import { viewsOf } from "./views";
-import { cell, poolOf, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { BrandSummaryView, VerdictFact } from "./brand_summary";
 import type { AnswerRef } from "./analysis_types";
-import { matchKey } from "../brand_key";
+import type { AlternativesViews } from "./alternatives";
 import { ROW_NAME } from "./question_names";
-import { askedMatchupKeys, clearsMatchupGap } from "./matchup_gap";
+import { clearsMatchupGap } from "./matchup_gap";
 import type { MoveNames } from "./finding_moves";
 import { buyerPhrase, possName } from "./brief_words";
 import { condLabel } from "./panel_text";
+import type { Scope } from "./facts/fact";
+import { OVERVIEW_FLOORS as OF } from "./facts/measure_book";
+import { closeGates, extremeWords, finish, gApart, gAtLeast, gBelow, gGap, gK, gLowAbove, gN, isFactCell, openGates, pd, pfine, pw, type FactCell, type Gate, type StmtNums } from "./facts/statements";
+import { inputsFromFacts, refsFor, sharedRunFacts, sitSlice, summaryFromFacts, worrySlice, type CardCondRow, type RunFacts } from "./facts/overview_facts";
 
 /**
  * Insight detection for the summary documents (2026-11-03): mechanical
@@ -174,6 +169,9 @@ export interface Insight {
   matchup?: { key: string; name: string };
   /** bs26 (2026-11-16): the names its Overview move fills in (finding_moves.ts; variant = which way it reads). */
   names?: MoveNames;
+  /** bs28 (statements): where each number of the title, body and bars sits, with its fact id ("viz.<i>" for a bar) -
+   * never drawn; a proof recomputes every number from its id. */
+  facts?: Record<string, StmtNums>;
 }
 
 /** One bar of a finding's small chart: value 0-100 (bar length), text the
@@ -189,193 +187,12 @@ export interface InsightBar {
   refs?: AnswerRef[];
   /** bs26 (2026-11-16): whose number it is - you (blue), a named rival (pink), anything else (grey). */
   who?: "you" | "rival" | "other";
+  /** bs28: the fact (or derived ref) the bar prints - its example answers are that fact's own answers. Never drawn. */
+  fact?: string;
 }
 
-/* ------------------------- bs16: example answers ------------------------- */
-
-/** How many example answers a number carries. */
+/** How many example answers a number carries (a bar's examples are its fact's own answers - finishInsight). */
 export const EXAMPLES = 5;
-
-/** Up to `k` answers as AnswerRefs, deterministic (response id order) and
- * spread across assistants: one per assistant first, then the rest in order.
- * Rows with nothing to highlight are skipped. */
-export function exampleRefs(rows: PoolRow[], findOf: (r: PoolRow) => string, k = EXAMPLES): AnswerRef[] {
-  const sorted = [...rows].sort((a, b) => (a.code.response_id < b.code.response_id ? -1 : a.code.response_id > b.code.response_id ? 1 : 0));
-  const withFind = sorted.map((r) => ({ r, find: findOf(r).trim() }));
-  // An answer with nothing to highlight is left out (the modal needs a passage).
-  const order = withFind.filter((x) => x.find);
-  const out: { r: PoolRow; find: string }[] = [];
-  const models = new Set<string>();
-  const ids = new Set<string>();
-  for (const x of order) {
-    if (out.length >= k) break;
-    if (models.has(x.r.model) || ids.has(x.r.code.response_id)) continue;
-    models.add(x.r.model);
-    ids.add(x.r.code.response_id);
-    out.push(x);
-  }
-  for (const x of order) {
-    if (out.length >= k) break;
-    if (ids.has(x.r.code.response_id)) continue;
-    ids.add(x.r.code.response_id);
-    out.push(x);
-  }
-  return out.map((x) => ({ responseId: x.r.code.response_id, find: x.find }));
-}
-
-/**
- * The answers behind the detectors' numerators (bs16): each method filters
- * the same pool, under the same engine set and resolver, with the same
- * predicate the number counts, and returns example refs. Built once per
- * insightInputs; in-process only (closures - never serialized).
- */
-export interface ExampleIndex {
-  /** Open-choice answers whose pick resolves to `key` (a key list pools
-   * several; null = any in-category pick), optionally on some engines, in a
-   * room, outside a room, or in one question (intent). */
-  picks(key: string | string[] | null, opt?: { models?: string[]; room?: string; notRoom?: string; intentId?: string }): AnswerRef[];
-  /** Open-choice answers naming the brand (any active mention, or the pick). */
-  named(key: string): AnswerRef[];
-  /** Open-choice answers recommending the brand (a recommended mention, or the pick). */
-  recommended(key: string): AnswerRef[];
-  /** Open-choice firm picks outside the category (B5), optionally in a room. */
-  outside(opt?: { room?: string }): AnswerRef[];
-  /** Open-choice answers arguing `code`, picking you or another in-category brand. */
-  argued(code: string, side: "you" | "others"): AnswerRef[];
-  /** Entity head-to-heads the target wins, optionally against one rival (the
-   * summary's rival key) or on some engines. */
-  h2hWins(opt?: { rivalKey?: string; models?: string[] }): AnswerRef[];
-  /** Entity head-to-heads won / lost to the cell's rival, arguing `code`. */
-  h2hArg(code: string, side: "wins" | "losses"): AnswerRef[];
-  /** Buyers' worries (objections) or customers' worries (keep or leave) matching the predicate. */
-  doubt(kind: "objections" | "keep", pred: (r: PoolRow) => boolean): AnswerRef[];
-  /** Value answers in a room with the verdict. */
-  value(room: string, worth: "yes"): AnswerRef[];
-  /** Problem-recognition answers routed outside the category. */
-  routing(opt?: { room?: string; notRoom?: string }): AnswerRef[];
-}
-
-function buildExampleIndex(data: ViewData, engines: ViewRequest, resolve: ReturnType<typeof buildResolver>, targetKey: string): ExampleIndex {
-  const pools = new Map<string, PoolRow[]>();
-  const pool = (v: Parameters<typeof poolOf>[1]) => {
-    let p = pools.get(v);
-    if (!p) pools.set(v, (p = poolOf(data, v, engines).rows));
-    return p;
-  };
-  const memo = new Map<string, { key: string | null; status: string }>();
-  const res = (s: string) => {
-    let r = memo.get(s);
-    if (!r) {
-      const x = resolve(s);
-      memo.set(s, (r = { key: x.status === "active" ? x.key : null, status: x.status }));
-    }
-    return r;
-  };
-  /** The active key of an answer's pick, or null. */
-  const pickKey = (r: PoolRow) => (r.code.outcome === "pick" && r.code.top_pick ? res(r.code.top_pick).key : null);
-  const quote = (r: PoolRow) => (r.code.quote ?? "").trim();
-  /** The brand as the answer writes it, or the quote when it names the brand. */
-  const brandFind = (key: string) => (r: PoolRow) => {
-    let form = "";
-    for (const m of r.code.mentions ?? []) if (res(m.brand).key === key) {
-      form = m.brand;
-      break;
-    }
-    if (!form && r.code.top_pick && res(r.code.top_pick).key === key) form = r.code.top_pick;
-    const q = quote(r);
-    if (q && (!form || q.toLowerCase().includes(form.toLowerCase()))) return q;
-    return form || q;
-  };
-  const pickFind = (r: PoolRow) => {
-    const k = pickKey(r);
-    return k ? brandFind(k)(r) : quote(r) || (r.code.top_pick ?? "");
-  };
-  const doubtFind = (r: PoolRow) => (r.code.premise_quote ?? "").trim() || quote(r);
-  const inModels = (models?: string[]) => (r: PoolRow) => !models || models.includes(r.model);
-  return {
-    picks(key, opt = {}) {
-      const keys = key === null ? null : new Set(Array.isArray(key) ? key : [key]);
-      const m = inModels(opt.models);
-      const rows = pool("headline").filter((r) => {
-        const k = pickKey(r);
-        if (!k || (keys && !keys.has(k)) || !m(r)) return false;
-        if (opt.room !== undefined && r.intent.situation !== opt.room) return false;
-        if (opt.notRoom !== undefined && r.intent.situation === opt.notRoom) return false;
-        if (opt.intentId !== undefined && r.intent.id !== opt.intentId) return false;
-        return true;
-      });
-      return exampleRefs(rows, pickFind);
-    },
-    named(key) {
-      const rows = pool("headline").filter((r) => pickKey(r) === key || (r.code.mentions ?? []).some((x) => res(x.brand).key === key));
-      return exampleRefs(rows, brandFind(key));
-    },
-    recommended(key) {
-      const rows = pool("headline").filter(
-        (r) => pickKey(r) === key || (r.code.mentions ?? []).some((x) => x.framing === "recommended" && res(x.brand).key === key)
-      );
-      return exampleRefs(rows, brandFind(key));
-    },
-    outside(opt = {}) {
-      const rows = pool("headline").filter(
-        (r) => r.code.outcome === "pick" && !pickKey(r) && (opt.room === undefined || r.intent.situation === opt.room)
-      );
-      return exampleRefs(rows, (r) => (r.code.top_pick ?? "").trim() || quote(r));
-    },
-    argued(code, side) {
-      const rows = pool("headline").filter((r) => {
-        const k = pickKey(r);
-        if (!k || r.code.reasons === null || !r.code.reasons.includes(code)) return false;
-        return side === "you" ? k === targetKey : k !== targetKey;
-      });
-      return exampleRefs(rows, () => code);
-    },
-    h2hWins(opt = {}) {
-      const m = inModels(opt.models);
-      const rows = pool("head_to_head_entity").filter((r) => {
-        if (pickKey(r) !== targetKey || !m(r)) return false;
-        if (opt.rivalKey === undefined) return true;
-        const a = res(r.intent.angle);
-        return (a.key ?? `?${matchKey(r.intent.angle)}`) === opt.rivalKey;
-      });
-      return exampleRefs(rows, brandFind(targetKey));
-    },
-    h2hArg(code, side) {
-      const rows = pool("head_to_head_entity").filter((r) => {
-        if (r.code.outcome !== "pick" || !r.code.top_pick || r.code.reasons === null || !r.code.reasons.includes(code)) return false;
-        const a = res(r.intent.angle).key;
-        if (!a) return false;
-        const k = pickKey(r);
-        return side === "wins" ? k === targetKey : k === a;
-      });
-      return exampleRefs(rows, () => code);
-    },
-    doubt(kind, pred) {
-      return exampleRefs(pool(kind === "objections" ? "doubt" : "keep_or_leave").filter(pred), doubtFind);
-    },
-    value(room, worth) {
-      return exampleRefs(
-        pool("value").filter((r) => (r.intent.situation ?? "") === room && r.code.worth_it === worth),
-        quote
-      );
-    },
-    routing(opt = {}) {
-      const rows = pool("awareness_routing").filter((r) => {
-        if (r.code.category_routed !== "adjacent") return false;
-        if (opt.room !== undefined && r.intent.situation !== opt.room) return false;
-        if (opt.notRoom !== undefined && (!r.intent.situation || r.intent.situation === opt.notRoom)) return false;
-        return true;
-      });
-      return exampleRefs(rows, quote);
-    },
-  };
-}
-
-/** The models of the summary's engine slices that pass the filter. */
-const modelsOf = (s: Omit<BrandSummaryView, "insights" | "verdict">, f: (e: Omit<BrandSummaryView, "insights" | "verdict">["byEngine"][number]) => boolean) =>
-  s.byEngine.filter(f).map((e) => e.key);
-/** A worry's row key, as doubt.ts groups answers: stage + concern. */
-const worryKey = (r: PoolRow) => `${r.intent.stage}|${r.intent.concern ?? ""}`;
 
 /* -------- bf26: the Brief's style (third person, buyers as words, the cards' vocabulary) --------
  * rankedInsights(s, inp, { name }) runs the same detectors with STYLE set: the served insights (STYLE null)
@@ -431,14 +248,13 @@ const pickedOfTwo = (c: RateCell) =>
 /** bs26: a bar marked with whose number it is. */
 const W = (who: "you" | "rival" | "other", b: InsightBar | null | undefined | false): InsightBar | null | undefined | false => (b ? { ...b, who } : b);
 
-/** A bar with its example answers attached (when any). */
-const withRefs = (b: InsightBar | null | undefined | false, refs: AnswerRef[] | undefined): InsightBar | null | undefined | false =>
-  b && refs && refs.length ? { ...b, refs } : b;
 
 /** A bar from a share (0-1) or a rate cell; text defaults to the sentences' pct. */
 export function insightBar(label: string, x: number | RateCell, text?: string, hi = false): InsightBar {
   const r = typeof x === "number" ? x : x.n > 0 ? x.k / x.n : 0;
-  return { label, value: Math.max(0, Math.min(100, Math.round(r * 1000) / 10)), text: text ?? pctShare(r), ...(hi ? { hi: true as const } : {}) };
+  // A fact's bar prints from the fact (its marker carries the id - finishInsight reads it back for the bar's fact
+  // and its example answers).
+  return { label, value: Math.max(0, Math.min(100, Math.round(r * 1000) / 10)), text: text ?? (typeof x !== "number" && isFactCell(x) ? pw(x) : pctShare(r)), ...(hi ? { hi: true as const } : {}) };
 }
 const pctShare = (x: number) => (x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`);
 /** 2-4 bars or nothing: a single bar is not a comparison. */
@@ -455,8 +271,8 @@ const lbl = (t: string, n = 44) => {
 
 /** Both ends of a spread need this many decided (or judged) answers -
  * the same floor brand_summary's argument lift uses. */
-const MIN_BASE = 20;
-const MAX_INSIGHTS = 12;
+const MIN_BASE = OF.minBase;
+const MAX_INSIGHTS = OF.maxInsights;
 /** Kinds the verdict's own sentences carry by construction - no guaranteed
  * slot in the served list (they still serve wherever global rank puts them). */
 const QUOTA_EXEMPT: ReadonlySet<InsightKind> = new Set(["funnel", "value"]);
@@ -465,26 +281,28 @@ const QUOTA_EXEMPT: ReadonlySet<InsightKind> = new Set(["funnel", "value"]);
  * a bigger story than a 0.4 engine spread) and each detector already proved
  * itself statistically to fire. The floor only stops a quiet tracker's list
  * from padding to the cap with small-gap findings. */
-const FILL_MIN_EFFECT = 0.3;
+const FILL_MIN_EFFECT = OF.fillMinEffect;
 
-/** The sibling-view inputs the detectors read, all under the summary's request. */
+/** The detectors' inputs (facts/overview_facts.ts inputsFromFacts): every number a FactCell looked up from the run's
+ * one fact book under the summary's engine set. The field shapes the Brief's legacy paths and the dossiers read are
+ * kept. */
 export interface InsightInputs {
-  /** Per buyer room: the target's share of decided in that room's open-choice
-   * answers, its picks there and the room's in-category picks (bs8: firmAll,
-   * every firm pick, in the category or not). */
+  /** Per buying situation (what to buy, ruling 7): your share of the picks there, your picks, the picks of a brand in
+   * analysis there (firm) and every pick there (firmAll). */
   rooms: { room: string; decided: RateCell; picks: number; firm: number; firmAll: number }[];
   value: ValueView | null;
   doubt: DoubtViews;
-  /** Per open-choice question (cell - seed + paraphrases, named by the seed): picks by resolved active brand key. */
+  /** Per what-to-buy question (cell - seed + paraphrases, named by the seed): picks by brand in analysis. */
   questions: { id: string; text: string; answers: number; picks: Record<string, number> }[];
   settled: SettledViews;
-  /** Criteria-taught incidence per code, most taught first; [] without a criteria pool. */
+  /** What to look for: each code's share of those answers, most taught first; [] under the floor. */
   taught: { code: string; rate: RateCell }[];
-  /** bs7: rival leavers and holding your own (computeAlternatives). */
   alternatives: AlternativesViews;
-  /** bs7: the run's largest away-routing condition groups (top AWAY_TOP by
-   * answers) and the questions with any away rule; null without rules. */
+  /** Ruling 10: the What to buy card's own away condition rows (shares of all its answers, ruling 4). null without
+   * rules. `groups` / `cells` / `lead` (the run-wide rollup) are the Brief's legacy input, filled by the Brief only. */
   away: {
+    rows?: CardCondRow[];
+    scope?: Scope;
     groups: {
       label: string;
       rules: number;
@@ -492,17 +310,10 @@ export interface InsightInputs {
       cells: number;
       wall: boolean;
       routes: { name: string; n: number }[];
-      /** The longest active dictionary form in the wording, the client excluded. */
       names: { key: string; name: string } | null;
     }[];
     cells: number;
     grouping: "embeddings" | "stems";
-    /** bs20: with reason themes, the finding's headline counts the top away
-     * theme at ANSWER grain - `answers` distinct answers stating any of its
-     * wordings, over `base` distinct answers stating any listed away condition
-     * (the default "otherwise" clause left out). `wording` = its most-stated
-     * member wording; `wall` = the possession test on the theme name shown.
-     * Absent keyless or on a failed theme pass (the raw-group finding serves). */
     lead?: {
       label: string;
       answers: number;
@@ -513,362 +324,64 @@ export interface InsightInputs {
       top: { label: string; answers: number }[];
     };
   } | null;
-  /** bs7: open-choice picks per resolved active brand, by engine (model id). */
+  /** Picks per brand in analysis on what to buy, by assistant (model id). */
   enginePicks: { key: string; total: number; byModel: Record<string, number> }[];
-  /** bs8: reason codes on the pooled entity head-to-heads - answers the
-   * target wins (top pick = the client) and loses (top pick = the cell's
-   * rival), per code with the losses split by rival key. */
+  /** Arguments on the pooled direct matchups: the answers you win and those the named rival wins, per code. */
   h2hArgs: {
     wins: number;
     losses: number;
     rivals: Record<string, string>;
-    codes: { code: string; wins: number; losses: number; lossesBy: Record<string, number> }[];
+    codes: { code: string; wins: number; losses: number; lossesBy: Record<string, number>; w?: RateCell; l?: RateCell }[];
+    winsCell?: RateCell;
+    lossesCell?: RateCell;
   };
-  /** bs8: open-choice firm picks (B5) - all of them, the in-category ones,
-   * and the names outside the category (ruled out, pending, unknown); per room. */
+  /** Picks that leave the category (ruling 8: outside the category), overall and per buying situation. */
   leak: {
     firm: number;
     inCategory: number;
     names: { name: string; n: number }[];
     rooms: { room: string; firm: number; outside: number }[];
+    outsideCell?: RateCell;
+    roomCells?: Record<string, RateCell>;
   };
-  /** bs8: problem recognition - answers routed outside the category
-   * (category_routed adjacent), overall and per buyer room; null without the pool. */
+  /** Problem questions answered outside the category (ruling 5: adjacent), overall and per buying situation. */
   problem: { all: RateCell; rooms: { room: string; out: RateCell }[] } | null;
-  /** The brief (bf1): both branches of the run's decision rules - the largest
-   * condition groups routing toward the client and away, with the questions
-   * each side appears in. Not read by any detector. null without rules. */
+  /** The Brief's legacy condition rollup (brief_legacy_inputs.ts) - not read by any detector; absent on the summary. */
   conditions?: {
-    /** bs21: a themed row also carries `answers` (distinct answers stating any
-     * of its wordings) and `wording` (its most-stated member wording); keyless
-     * rows are the raw groups unchanged. */
     toward: { label: string; rules: number; cells: number; wall: boolean; routes: { name: string; n: number }[]; answers?: number; wording?: string }[];
     away: { label: string; rules: number; cells: number; wall: boolean; routes: { name: string; n: number }[]; answers?: number; wording?: string }[];
     towardCells: number;
     awayCells: number;
-    /** bs17: that side's list is reason THEMES (`rules` = statements), as `away.themed`. */
     towardThemed?: true;
     awayThemed?: true;
-    /** bs21 (one counting rule): a themed side's ANSWER base - distinct
-     * answers stating any listed condition on that side (default clause out).
-     * A themed row's share = answers / base. Absent on a raw side. */
     towardBase?: number;
     awayBase?: number;
-    /** 2026-11-08: the largest default-shaped group per side ("otherwise" -
-     * isDefaultCondition), whatever its rank, for the condition card's default
-     * row. The lists above are unchanged (they still carry a default group that
-     * ranks into them, since the brief's sentences cite them). */
     defaults?: { side: "you" | "away"; label: string; cells: number; routes: { name: string; n: number }[] }[];
   } | null;
-  /** bs19: the pooled lost answers of the entity head-to-heads lost on
-   * balance, and the client-side conditions stated in them (bs20: the run's
-   * reason themes when it has them, raw condition groups keyless - each with
-   * its per-rival spread); the open-choice comparison (answers picking another in-category
-   * brand that still state any client-side condition). null without rules or
-   * without a lost matchup. */
+  /** Ruling 10: each direct matchup lost on balance, with its card's own toward rows counted in the answers that pick
+   * the rival (the lost-with-an-exception step). */
   exception?: {
-    lost: number;
-    matchups: { key: string; name: string; lost: number }[];
-    any: number;
-    /** bs20: with reason themes each row is a theme (`themed`), carrying its
-     * most-stated member wording; keyless the raw condition groups as before. */
-    groups: { label: string; answers: number; wall: boolean; themed?: true; wording?: string; byRival: Record<string, number>; refs: AnswerRef[] }[];
-    open: RateCell | null;
+    cards: { key: string; name: string; scope: Scope; lost: FactCell; any: FactCell; rows: CardCondRow[] }[];
   } | null;
-  /** bs24: per argument, its share of the answers that pick you and of those
-   * that pick a rival, in each pick contest (the reasons view's verdicts). */
+  /** Per argument, its share of the answers that pick you and of those that pick another brand in analysis, in each
+   * pick contest. */
   argSides: { code: string; types: { type: ArgContest; you: RateCell; other: RateCell }[] }[];
-  /** bs16: the answers behind the detectors' numerators (in-process only). */
-  ex?: ExampleIndex;
-  /** bs23: the rival keys the run asked a direct matchup against (entity
-   * or class cells on the summary's engines) - matchup_gap.ts. */
+  /** The rival keys the run asked a direct matchup against. */
   asked?: string[];
+  /** In-process only: look up the pooled fact a detector states (the rest of the buying situations, the other AI
+   * companies, the rest of the worries) - one fact, never a sum. */
+  F?: { fact: (measure: string, subject: string, scope: Scope) => FactCell; wtb: Scope; engines: string[]; rf: RunFacts };
 }
 
-const AWAY_TOP = 3;
-
-/** Computed from the summary's own load (one data read, no extra fetches):
- * the same pure computes the headline, value and doubt routes cache, with
- * the summary's engine set. */
+/** The detectors' inputs for a load, from the run's facts (one fact book shared with the Map). */
 export async function insightInputs(data: ViewData, request: ViewRequest = {}): Promise<InsightInputs> {
-  const engines = request.engines ? { engines: request.engines } : {};
-  const roomSet = new Set<string>();
-  for (const it of data.intents)
-    if (it.situation && viewsOf(it.stage, it.angle).includes("headline")) roomSet.add(it.situation);
-  const rooms = [...roomSet].sort().map((room) => {
-    const h = computeHeadline(data, { room, ...engines });
-    const t = h.brands.find((b) => b.role === "target");
-    return { room, decided: t ? t.shareOfDecided : cell(0, h.firmPickInCategory.k), picks: t ? t.chosen.k : 0, firm: h.firmPickInCategory.k, firmAll: h.firmPick.k };
-  });
-  // Per question (the CELL: a seed and its paraphrases pooled, keyed by the
-  // intent like workbench.ts's Question dimension, named by its seed
-  // wording): in-category picks by resolved brand, headline pool.
-  const resolve = buildResolver(data.dictionary, data.judged);
-  const qs = new Map<string, { id: string; text: string; answers: number; picks: Record<string, number> }>();
-  const byBrand = new Map<string, { key: string; total: number; byModel: Record<string, number> }>();
-  for (const { code, intent, model } of poolOf(data, "headline", engines).rows) {
-    const q = qs.get(intent.id) ?? { id: intent.id, text: intent.text, answers: 0, picks: {} };
-    q.answers++;
-    if (code.outcome === "pick" && code.top_pick) {
-      const r = resolve(code.top_pick);
-      if (r.status === "active") {
-        q.picks[r.key] = (q.picks[r.key] ?? 0) + 1;
-        const b = byBrand.get(r.key) ?? { key: r.key, total: 0, byModel: {} };
-        b.total++;
-        b.byModel[model] = (b.byModel[model] ?? 0) + 1;
-        byBrand.set(r.key, b);
-      }
-    }
-    qs.set(intent.id, q);
-  }
-  const reasons = computeReasons(data, engines);
-  const argSides: InsightInputs["argSides"] = reasons.codes.map((c) => ({
-    code: c.key,
-    types: ARG_CONTESTS.flatMap((type) => {
-      const v = c.byVerdict[type];
-      return v?.you && v?.other ? [{ type, you: v.you, other: v.other }] : [];
-    }),
-  }));
-  const criteria = reasons.types.find((t) => t.key === "criteria_taught");
-  const taught =
-    criteria && criteria.answers >= MIN_BASE
-      ? reasons.codes
-          .filter((c) => c.byType.criteria_taught && c.byType.criteria_taught.k > 0)
-          .map((c) => ({ code: c.key, rate: c.byType.criteria_taught! }))
-          .sort((a, b) => b.rate.k - a.rate.k || a.code.localeCompare(b.code))
-      : [];
-  // The run's decision rules: the explorer's own compute (sides, dedup and
-  // the one run-wide condition grouping, cached under its scope).
-  const targetKey = resolve(data.project.brand).key;
-  const forms: { seq: string[]; key: string; name: string }[] = [];
-  for (const e of data.dictionary) {
-    if (e.status !== "active" || e.id === targetKey) continue;
-    for (const f of [e.canonical, ...e.aliases]) {
-      const seq = famTokens(f);
-      if (seq.length) forms.push({ seq, key: e.id, name: e.display_name ?? e.canonical });
-    }
-  }
-  const namesIn = (label: string) => {
-    const hay = famTokens(label);
-    let best: (typeof forms)[number] | null = null;
-    for (const f of forms) if (containsSeq(hay, f.seq) && (!best || f.seq.length > best.seq.length)) best = f;
-    return best ? { key: best.key, name: best.name } : null;
-  };
-  // bs17 (2026-11-12, the reasons harmonization): the run's shared rules and
-  // reason themes (run_themes.ts) - the same RulesView computeRules served
-  // here before, plus the dt4 theme maps. With theme maps, the away groups and
-  // the brief's condition branches read THEME rollups (a theme's name, its
-  // statements, answers, questions, fixed-situation test and destinations);
-  // without them (keyless, a failed pass) the raw groups as before.
-  const rt = await sharedRunThemes(data, engines);
-  const rules = rt.rules.rules;
-  const awayThemed = !!rt.away;
-  const towardThemed = !!rt.toward;
-  const awayRoll = themeRollup(rt.awayPool, rt.away, rt.rules, rt.sitOf, "away", data.project.brand);
-  const towardRoll = themeRollup(rt.towardPool, rt.toward, rt.rules, rt.sitOf, "toward", data.project.brand);
-  // bs20 (2026-11-13, one counting rule): the raw away groups stay as inputs -
-  // the keyless finding counts them, and the themed finding still detects a
-  // blocker brand or a fixed situation on one wording (a broad theme can cover
-  // every away question, so it must never swallow those).
-  const awayGroups = rules.groups
-    .filter((g) => g.side === "away")
-    .sort((a, b) => b.answers - a.answers || b.rules - a.rules || a.label.localeCompare(b.label))
-    .slice(0, AWAY_TOP)
-    .map((g) => ({ label: g.label, rules: g.rules, answers: g.answers, cells: g.cells, wall: g.wall, routes: g.routes, names: namesIn(g.label) }));
-  // bs20: the themed headline - the top away theme by distinct answers, over
-  // the distinct answers stating any listed away condition (the pool the theme
-  // pass read: default clause out, groups stated by 2+ answers).
-  const answerBase = (pool: RuleGroup[]) => {
-    const base = new Set<string>();
-    for (const g of pool) for (const ids of rt.rules.cellAnswers.get(g.id)?.values() ?? []) for (const id of ids) base.add(id);
-    return base.size;
-  };
-  const awayBase = awayThemed ? answerBase(rt.awayPool) : 0;
-  const towardBase = towardThemed ? answerBase(rt.towardPool) : 0;
-  let awayLead: NonNullable<InsightInputs["away"]>["lead"];
-  if (awayThemed && awayRoll.length > 0) {
-    const t = awayRoll[0];
-    awayLead = {
-      label: t.label,
-      answers: t.answers,
-      base: awayBase,
-      wall: t.wall,
-      wording: t.members[0] ?? t.label,
-      routes: t.routes,
-      top: awayRoll.slice(0, AWAY_TOP).map((x) => ({ label: x.label, answers: x.answers })),
-    };
-  }
-  // bs21: themed rows carry their answer count and most-stated wording (the brief counts them at answer grain).
-  const themeTop = (xs: ThemeRollup[]) =>
-    xs.slice(0, 6).map((t) => ({ label: t.label, rules: t.rules, cells: t.cells, wall: t.wall, routes: t.routes, answers: t.answers, wording: t.members[0] ?? t.label }));
-
-  // bs8: reason codes on the pooled entity head-to-heads (the summary's own
-  // rival resolution: the cell's angle through the dictionary).
-  const h2hArgs: InsightInputs["h2hArgs"] = { wins: 0, losses: 0, rivals: {}, codes: [] };
-  const codeTally = new Map<string, { code: string; wins: number; losses: number; lossesBy: Record<string, number> }>();
-  for (const { code, intent } of poolOf(data, "head_to_head_entity", engines).rows) {
-    if (code.outcome !== "pick" || !code.top_pick || code.reasons === null) continue;
-    const r = resolve(intent.angle);
-    if (r.status !== "active") continue;
-    const p = resolve(code.top_pick);
-    const side = p.key === targetKey ? "wins" : p.key === r.key ? "losses" : null;
-    if (!side) continue;
-    h2hArgs[side]++;
-    if (side === "losses") h2hArgs.rivals[r.key] = r.name;
-    for (const c of new Set(code.reasons)) {
-      const t = codeTally.get(c) ?? { code: c, wins: 0, losses: 0, lossesBy: {} };
-      t[side]++;
-      if (side === "losses") t.lossesBy[r.key] = (t.lossesBy[r.key] ?? 0) + 1;
-      codeTally.set(c, t);
-    }
-  }
-  h2hArgs.codes = [...codeTally.values()].sort((a, b) => b.wins - a.wins || a.code.localeCompare(b.code));
-
-  // bs19: lost, with an exception - the entity head-to-heads the target loses
-  // on balance (the map's verdict, assigned_exception.ts lostOnBalance), their
-  // lost answers pooled, and the client-side conditions stated in them.
-  let exception: InsightInputs["exception"] = null;
-  if (rules.answers > 0) {
-    const mus = new Map<string, { key: string; name: string; won: number; lostIds: string[] }>();
-    const h2hRows = poolOf(data, "head_to_head_entity", engines).rows;
-    for (const { code, intent } of h2hRows) {
-      const r = resolve(intent.angle);
-      if (r.status !== "active") continue;
-      const m = mus.get(r.key) ?? { key: r.key, name: r.name, won: 0, lostIds: [] };
-      mus.set(r.key, m);
-      if (code.outcome !== "pick" || !code.top_pick) continue;
-      const p = resolve(code.top_pick).key;
-      if (p === targetKey) m.won++;
-      else if (p === r.key) m.lostIds.push(code.response_id);
-    }
-    const lostMus = [...mus.values()].filter((m) => lostOnBalance(m.won, m.lostIds.length)).sort((a, b) => b.lostIds.length - a.lostIds.length || a.name.localeCompare(b.name));
-    if (lostMus.length) {
-      const pickedBy = new Map<string, string>();
-      for (const m of lostMus) for (const id of m.lostIds) pickedBy.set(id, m.name);
-      const lostSet = new Set(pickedBy.keys());
-      // bs20: themed rows when the run has reason themes (the counting grain of
-      // the headline), raw condition groups keyless.
-      const raw = exceptionRows(lostSet, rt.towardPool, rt.rules.answerRules, towardThemed ? rt.toward : null, rt.sitOf);
-      // Head-to-heads are the choice schema: a rule is on your side when its choice resolves to you.
-      const anyIds = anyException(h2hRows.filter((r) => lostSet.has(r.code.response_id)), (rule) => resolve(rule.choice).key === targetKey);
-      // Open questions the AI hands another in-category brand that still state a client-side condition.
-      const openLost = poolOf(data, "headline", engines).rows.filter(({ code }) => {
-        if (code.outcome !== "pick" || !code.top_pick || code.decision_rules == null || code.schema !== "choice") return false;
-        const p = resolve(code.top_pick);
-        return p.status === "active" && p.key !== targetKey;
-      });
-      const openN = openLost.length;
-      const openK = anyException(openLost, (rule) => resolve(rule.choice).key === targetKey).size;
-      exception = {
-        lost: lostSet.size,
-        matchups: lostMus.map((m) => ({ key: m.key, name: m.name, lost: m.lostIds.length })),
-        any: anyIds.size,
-        groups: raw.rows.slice(0, 3).map((row) => {
-          const byRival: Record<string, number> = {};
-          for (const id of row.ids) {
-            const n = pickedBy.get(id)!;
-            byRival[n] = (byRival[n] ?? 0) + 1;
-          }
-          const refs = exceptionRefs(row, (id) => pickedBy.get(id), EXAMPLES);
-          return towardThemed
-            ? { label: row.label, answers: row.ids.size, wall: row.wall, themed: true as const, wording: row.members[0] ?? row.label, byRival, refs }
-            : { label: row.label, answers: row.ids.size, wall: row.wall, byRival, refs };
-        }),
-        open: openN >= MIN_BASE ? cell(openK, openN) : null,
-      };
-    }
-  }
-
-  // bs8: firm picks that leave the category (the headline's B5 buckets), run level and per room.
-  const runHeadline = computeHeadline(data, engines);
-  const outNames = new Map<string, number>();
-  for (const x of [...runHeadline.ruledOutPicks, ...runHeadline.pendingPicks, ...runHeadline.notInDictionaryPicks])
-    outNames.set(x.name, (outNames.get(x.name) ?? 0) + x.n);
-  const leak: InsightInputs["leak"] = {
-    firm: runHeadline.firmPick.k,
-    inCategory: runHeadline.firmPickInCategory.k,
-    names: [...outNames.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, n]) => ({ name, n })),
-    rooms: rooms.map((r) => ({ room: r.room, firm: r.firmAll, outside: r.firmAll - r.firm })),
-  };
-
-  // bs8: problem recognition routed outside the category, per room.
-  const routing = poolOf(data, "awareness_routing", engines).rows;
-  let problem: InsightInputs["problem"] = null;
-  if (routing.length > 0) {
-    const byRoom = new Map<string, { out: number; n: number }>();
-    for (const { code, intent } of routing) {
-      if (!intent.situation) continue;
-      const t = byRoom.get(intent.situation) ?? { out: 0, n: 0 };
-      t.n++;
-      if (code.category_routed === "adjacent") t.out++;
-      byRoom.set(intent.situation, t);
-    }
-    problem = {
-      all: cell(routing.filter((r) => r.code.category_routed === "adjacent").length, routing.length),
-      rooms: [...byRoom.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([room, t]) => ({ room, out: cell(t.out, t.n) })),
-    };
-  }
-
-  return {
-    ex: buildExampleIndex(data, engines, resolve, targetKey),
-    asked: [
-      ...askedMatchupKeys(
-        [...poolOf(data, "head_to_head_entity", engines).rows, ...poolOf(data, "head_to_head_class", engines).rows].map((r) => r.intent),
-        resolve,
-        data.dictionary,
-        targetKey
-      ),
-    ].sort(),
-    rooms,
-    value: computeValue(data, engines),
-    doubt: computeDoubt(data, engines),
-    questions: [...qs.values()],
-    settled: computeSettled(data, engines),
-    taught,
-    alternatives: computeAlternatives(data, engines),
-    away: rules.answers > 0 ? { groups: awayGroups, cells: rules.cellsBySide.away, grouping: rules.grouping, ...(awayLead ? { lead: awayLead } : {}) } : null,
-    enginePicks: [...byBrand.values()].sort((a, b) => b.total - a.total || a.key.localeCompare(b.key)),
-    h2hArgs,
-    argSides,
-    leak,
-    problem,
-    exception,
-    conditions:
-      rules.answers > 0
-        ? {
-            toward: towardThemed ? themeTop(towardRoll) : sideTop(rules.groups, "you"),
-            away: awayThemed ? themeTop(awayRoll) : sideTop(rules.groups, "away"),
-            ...(towardThemed ? { towardThemed: true as const } : {}),
-            ...(awayThemed ? { awayThemed: true as const } : {}),
-            towardCells: rules.cellsBySide.you,
-            awayCells: rules.cellsBySide.away,
-            ...(towardThemed ? { towardBase } : {}),
-            ...(awayThemed ? { awayBase } : {}),
-            defaults: (["you", "away"] as const).flatMap((side) => {
-              const g = rules.groups
-                .filter((x) => x.side === side && isDefaultCondition(x.label))
-                .sort((a, b) => b.answers - a.answers || b.rules - a.rules || a.label.localeCompare(b.label))[0];
-              return g ? [{ side, label: g.label, cells: g.cells, routes: g.routes }] : [];
-            }),
-          }
-        : null,
-  };
-}
-
-/** The largest groups on one side of the rules, for the brief's conditions paragraph. */
-function sideTop(groups: RuleGroup[], side: "you" | "away") {
-  return groups
-    .filter((g) => g.side === side)
-    .sort((a, b) => b.answers - a.answers || b.rules - a.rules || a.label.localeCompare(b.label))
-    .slice(0, 6)
-    .map((g) => ({ label: g.label, rules: g.rules, cells: g.cells, wall: g.wall, routes: g.routes }));
+  const rf = await sharedRunFacts(data, request);
+  return inputsFromFacts(data, rf, summaryFromFacts(data, rf));
 }
 
 const rate = (c: RateCell) => (c.n > 0 ? c.k / c.n : 0);
-const pct = (c: RateCell | number) => {
-  const x = typeof c === "number" ? c : rate(c);
-  return x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`;
-};
+/** A share in print, from a fact (marked with its id - statements.ts) or, for a number that is no fact, plain. */
+const pct = (c: RateCell | number) => pw(c);
 /** A share in print: one decimal under 10% (so the convention's "6.7% of
  * all answers" survives rounding), whole points above. */
 export const pctFine = (x: number) => {
@@ -895,17 +408,21 @@ export function productNoun(category: string): string {
 /** The two-pick-numbers convention (BRIEF_PILL_DESIGN_2026-11-04.md): the
  * commit rate bridges share of picks and Picked whenever both appear. */
 export function commitSentence(category: string, brand: string, commit: RateCell, share: RateCell, picked: RateCell): string {
-  return `The AI commits to one ${productNoun(category)} in ${pct(commit)} of answers. When it does, ${brand} is the pick ${pct(share)} of the time - ${pctFine(rate(picked))} of all answers.`;
+  return `The AI commits to one ${productNoun(category)} in ${pct(commit)} of answers. When it does, ${brand} is the pick ${pct(share)} of the time - ${pfine(picked)} of all answers.`;
 }
 
-const pts = (x: number) => `${Math.round(Math.abs(x) * 100)} points`;
+/** The gap between two shares in points, derived from the two facts (statements.ts "diff_pts"). */
+const pts = (a: RateCell, b: RateCell) => pd("diff_pts", [a, b]);
 const counts = (c: RateCell) => `${c.k} of ${c.n} (95% range ${Math.round(c.low * 100)}-${Math.round(c.high * 100)}%)`;
-const apart = (hi: RateCell, lo: RateCell) => hi.low > lo.high;
+/** Two ranges apart (the first above) - a decision, logged with its facts while a gate log is open. */
+const apart = (hi: RateCell, lo: RateCell) => gApart(hi, lo);
+/** A base that clears the floor - logged likewise. */
+const enough = (c: RateCell, min = MIN_BASE) => gN(c, min);
 
 /** The highest and lowest of the items whose base clears the floor, when
  * their ranges do not overlap. */
 function ends<T>(items: T[], cellOf: (t: T) => RateCell): { hi: T; lo: T } | null {
-  const ok = items.filter((t) => cellOf(t).n >= MIN_BASE);
+  const ok = items.filter((t) => enough(cellOf(t)));
   if (ok.length < 2) return null;
   const sorted = [...ok].sort((a, b) => rate(cellOf(b)) - rate(cellOf(a)));
   const hi = sorted[0];
@@ -915,7 +432,7 @@ function ends<T>(items: T[], cellOf: (t: T) => RateCell): { hi: T; lo: T } | nul
 
 type Summary = Omit<BrandSummaryView, "insights" | "verdict">;
 
-function engineSpread(s: Summary, ex?: ExampleIndex): Insight | null {
+function engineSpread(s: Summary): Insight | null {
   const e = ends(s.byEngine, (x) => x.decided);
   if (!e) return null;
   const gap = rate(e.hi.decided) - rate(e.lo.decided);
@@ -928,32 +445,27 @@ function engineSpread(s: Summary, ex?: ExampleIndex): Insight | null {
     look: { pill: "table", label: "Metrics - by engine" },
     effect: gap,
     viz: vizOf([
-      W("you", withRefs(insightBar(e.hi.label, e.hi.decided), ex?.picks(s.target.key, { models: [e.hi.key] }))),
-      W("you", withRefs(insightBar(e.lo.label, e.lo.decided), ex?.picks(s.target.key, { models: [e.lo.key] }))),
+      W("you", insightBar(e.hi.label, e.hi.decided)),
+      W("you", insightBar(e.lo.label, e.lo.decided)),
     ]),
     names: { vendor: e.lo.label, vendor2: e.hi.label },
   };
 }
 
-/** Pools the by-engine slices on a key: target picks over in-category picks. */
-function pooled(s: Summary, keyOf: (e: Summary["byEngine"][number]) => string): { key: string; decided: RateCell; engines: number }[] {
-  const m = new Map<string, { k: number; n: number; engines: number }>();
-  for (const e of s.byEngine) {
-    const k = keyOf(e);
-    const t = m.get(k) ?? { k: 0, n: 0, engines: 0 };
-    t.k += e.decided.k;
-    t.n += e.decided.n;
-    t.engines++;
-    m.set(k, t);
-  }
-  return [...m.entries()].map(([key, t]) => ({ key, decided: cell(t.k, t.n), engines: t.engines }));
+/** Your share of the picks by mode or by AI company: each its own fact (the mode's engines, or the company, as the
+ * scope) - never a sum of the engine rows. */
+function pooled(s: Summary, inp: InsightInputs | undefined, by: "mode" | "vendor"): { key: string; decided: RateCell; engines: number }[] {
+  if (by === "mode") return s.byMode.map((m) => ({ key: m.key, decided: m.decided, engines: m.engines }));
+  if (!inp?.F) return [];
+  const vendors = [...new Set(s.byEngine.map((e) => e.vendor))].sort();
+  return vendors.map((v) => ({ key: v, decided: inp.F!.fact("share_of_picks", "you", { ...inp.F!.wtb, vendor: v }), engines: s.byEngine.filter((e) => e.vendor === v).length }));
 }
 
-function modeGap(s: Summary, ex?: ExampleIndex): Insight | null {
-  const modes = pooled(s, (e) => e.mode);
+function modeGap(s: Summary): Insight | null {
+  const modes = pooled(s, undefined, "mode");
   const search = modes.find((m) => m.key === "search");
   const instinct = modes.find((m) => m.key === "instinct");
-  if (!search || !instinct || search.decided.n < MIN_BASE || instinct.decided.n < MIN_BASE) return null;
+  if (!search || !instinct || !enough(search.decided) || !enough(instinct.decided)) return null;
   const [hi, lo] = rate(search.decided) >= rate(instinct.decided) ? [search, instinct] : [instinct, search];
   if (!apart(hi.decided, lo.decided)) return null;
   const searchWins = hi === search;
@@ -966,15 +478,15 @@ function modeGap(s: Summary, ex?: ExampleIndex): Insight | null {
     look: { pill: "table", label: "Metrics - by mode" },
     effect: rate(hi.decided) - rate(lo.decided),
     viz: vizOf([
-      W("you", withRefs(insightBar("With web search", search.decided), ex?.picks(s.target.key, { models: modelsOf(s, (e) => e.mode === "search") }))),
-      W("you", withRefs(insightBar("Without web search", instinct.decided), ex?.picks(s.target.key, { models: modelsOf(s, (e) => e.mode === "instinct") }))),
+      W("you", insightBar("With web search", search.decided)),
+      W("you", insightBar("Without web search", instinct.decided)),
     ]),
     names: { variant: searchWins ? "helps" : "hurts" },
   };
 }
 
-function vendorGap(s: Summary, ex?: ExampleIndex): Insight | null {
-  const e = ends(pooled(s, (x) => x.vendor), (x) => x.decided);
+function vendorGap(s: Summary, inp: InsightInputs): Insight | null {
+  const e = ends(pooled(s, inp, "vendor"), (x) => x.decided);
   if (!e) return null;
   return {
     key: "engine_vendor",
@@ -985,14 +497,14 @@ function vendorGap(s: Summary, ex?: ExampleIndex): Insight | null {
     look: { pill: "table", label: "Metrics - by vendor" },
     effect: rate(e.hi.decided) - rate(e.lo.decided),
     viz: vizOf([
-      W("you", withRefs(insightBar(e.hi.key, e.hi.decided), ex?.picks(s.target.key, { models: modelsOf(s, (x) => x.vendor === e.hi.key) }))),
-      W("you", withRefs(insightBar(e.lo.key, e.lo.decided), ex?.picks(s.target.key, { models: modelsOf(s, (x) => x.vendor === e.lo.key) }))),
+      W("you", insightBar(e.hi.key, e.hi.decided)),
+      W("you", insightBar(e.lo.key, e.lo.decided)),
     ]),
     names: { vendor: e.lo.key, vendor2: e.hi.key },
   };
 }
 
-function roomWin(inp: InsightInputs, targetKey: string): Insight | null {
+function roomWin(inp: InsightInputs): Insight | null {
   const e = ends(inp.rooms, (r) => r.decided);
   if (!e) return null;
   return {
@@ -1007,8 +519,8 @@ function roomWin(inp: InsightInputs, targetKey: string): Insight | null {
     look: { pill: "buyers", label: "Buyers" },
     effect: rate(e.hi.decided) - rate(e.lo.decided),
     viz: vizOf([
-      W("you", withRefs(insightBar(lbl(e.hi.room), e.hi.decided), inp.ex?.picks(targetKey, { room: e.hi.room }))),
-      W("you", withRefs(insightBar(lbl(e.lo.room), e.lo.decided), inp.ex?.picks(targetKey, { room: e.lo.room }))),
+      W("you", insightBar(lbl(e.hi.room), e.hi.decided)),
+      W("you", insightBar(lbl(e.lo.room), e.lo.decided)),
     ]),
     names: { buyer: e.lo.room, buyer2: e.hi.room },
   };
@@ -1030,16 +542,16 @@ function roomValue(inp: InsightInputs, brand: string): Insight | null {
     look: { pill: "stations", station: "value", label: "Stations - Value" },
     effect: rate(e.hi.worth.yes) - rate(e.lo.worth.yes),
     viz: vizOf([
-      W("you", withRefs(insightBar(lbl(e.hi.label), e.hi.worth.yes), inp.ex?.value(e.hi.key, "yes"))),
-      W("you", withRefs(insightBar(lbl(e.lo.label), e.lo.worth.yes), inp.ex?.value(e.lo.key, "yes"))),
+      W("you", insightBar(lbl(e.hi.label), e.hi.worth.yes)),
+      W("you", insightBar(lbl(e.lo.label), e.lo.worth.yes)),
     ]),
     names: { buyer: e.lo.label, buyer2: e.hi.label },
   };
 }
 
-function rivalOpen(s: Summary, ex?: ExampleIndex): Insight | null {
+function rivalOpen(s: Summary): Insight | null {
   const top = s.brands.find((b) => b.role !== "target" && b.chosen.k > 0);
-  if (!top || s.firmPickInCategory.k < MIN_BASE) return null;
+  if (!top || !enough(s.target.shareOfDecided)) return null;
   const [hi, lo] = rate(top.shareOfDecided) > rate(s.target.shareOfDecided) ? [top.shareOfDecided, s.target.shareOfDecided] : [s.target.shareOfDecided, top.shareOfDecided];
   if (!apart(hi, lo)) return null;
   return {
@@ -1051,18 +563,24 @@ function rivalOpen(s: Summary, ex?: ExampleIndex): Insight | null {
     look: { pill: "rivals", label: "Rivals" },
     effect: Math.abs(rate(top.shareOfDecided) - rate(s.target.shareOfDecided)),
     viz: vizOf([
-      W("rival", withRefs(insightBar(top.name, top.shareOfDecided), ex?.picks(top.key))),
-      W("you", withRefs(insightBar(s.brand, s.target.shareOfDecided, undefined, true), ex?.picks(s.target.key))),
+      W("rival", insightBar(top.name, top.shareOfDecided)),
+      W("you", insightBar(s.brand, s.target.shareOfDecided, undefined, true)),
     ]),
     names: { variant: rate(top.shareOfDecided) > rate(s.target.shareOfDecided) ? "behind" : "ahead", rival: top.name },
   };
 }
 
-function rivalHeadToHead(s: Summary, ex?: ExampleIndex): Insight | null {
-  const ok = s.headToHead.filter((r) => r.winOfDecided.n >= MIN_BASE);
+/** The hardest direct matchup: the lowest two-way record; ties by the most answers that pick the rival, then by name.
+ * One rule for the hardest-matchup finding, the prompted-vs-open finding and the exception finding. */
+function hardestOf(ok: Summary["headToHead"]): Summary["headToHead"][number] | null {
+  return [...ok].sort((a, b) => rate(a.winOfDecided) - rate(b.winOfDecided) || b.lost.k - a.lost.k || a.rival.localeCompare(b.rival))[0] ?? null;
+}
+
+function rivalHeadToHead(s: Summary): Insight | null {
+  const ok = s.headToHead.filter((r) => enough(r.winOfDecided));
   if (ok.length === 0) return null;
   const closest = [...ok].sort((a, b) => Math.abs(rate(a.winOfDecided) - 0.5) - Math.abs(rate(b.winOfDecided) - 0.5))[0];
-  const worst = [...ok].sort((a, b) => rate(a.winOfDecided) - rate(b.winOfDecided))[0];
+  const worst = hardestOf(ok)!;
   const foot = (r: typeof closest) =>
     `vs ${r.rival}: won ${r.won.k}, lost ${r.lost.k} - 95% range ${Math.round(r.winOfDecided.low * 100)}-${Math.round(r.winOfDecided.high * 100)}%`;
   if (closest.key === worst.key) {
@@ -1076,7 +594,7 @@ function rivalHeadToHead(s: Summary, ex?: ExampleIndex): Insight | null {
       foot: `${foot(worst)}. Matchups under ${MIN_BASE} decided answers left out.`,
       look: { pill: "rivals", label: "Rivals - head-to-head" },
       effect: Math.abs(rate(worst.winOfDecided) - 0.5),
-      viz: h2hBars(ok, worst.key, undefined, ex),
+      viz: h2hBars(ok, worst.key, undefined),
       names: { variant: rate(worst.winOfDecided) < 0.5 ? "lose" : "win", rival: worst.rival },
     };
   }
@@ -1090,23 +608,23 @@ function rivalHeadToHead(s: Summary, ex?: ExampleIndex): Insight | null {
     foot: `${foot(worst)}. ${foot(closest)}. Matchups under ${MIN_BASE} decided answers left out.`,
     look: { pill: "rivals", label: "Rivals - head-to-head" },
     effect: Math.abs(rate(closest.winOfDecided) - rate(worst.winOfDecided)),
-    viz: h2hBars(ok, worst.key, closest.key, ex),
+    viz: h2hBars(ok, worst.key, closest.key),
     names: { variant: rate(worst.winOfDecided) < 0.5 ? "lose" : "win", rival: worst.rival },
   };
 }
 
 /** One bar per named rival's direct-matchup record, the hardest first and
  * marked; the best matchup always kept; at most four. */
-function h2hBars(ok: Summary["headToHead"], hardest: string, keep?: string, ex?: ExampleIndex): InsightBar[] | undefined {
+function h2hBars(ok: Summary["headToHead"], hardest: string, keep?: string): InsightBar[] | undefined {
   const asc = [...ok].sort((a, b) => rate(a.winOfDecided) - rate(b.winOfDecided) || a.rival.localeCompare(b.rival));
   let rows = asc.slice(0, 4);
   const best = keep ? asc.find((r) => r.key === keep) : undefined;
   if (best && !rows.includes(best)) rows = [...rows.slice(0, 3), best];
   // Each bar is your win share against that rival - your number.
-  return vizOf(rows.map((r) => W("you", withRefs(insightBar(`vs ${r.rival}`, r.winOfDecided, undefined, r.key === hardest), ex?.h2hWins({ rivalKey: r.key })))));
+  return vizOf(rows.map((r) => W("you", insightBar(`vs ${r.rival}`, r.winOfDecided, undefined, r.key === hardest))));
 }
 
-function argument(s: Summary, ex?: ExampleIndex): Insight | null {
+function argument(s: Summary): Insight | null {
   const best = s.reasonLift[0];
   const worst = s.reasonLift.length > 1 ? s.reasonLift[s.reasonLift.length - 1] : undefined;
   if (!best || !worst) return null;
@@ -1128,19 +646,19 @@ function argument(s: Summary, ex?: ExampleIndex): Insight | null {
       ? cardBody
       : STYLE
       ? `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up in ${pz(best.wins)} of the answers that pick ${STYLE.name} and ${pz(best.others)} of those that pick a rival. Answers that pick a rival bring up ${worst.code} in ${pz(worst.others)}, against ${pz(worst.wins)} when ${STYLE.name} is picked.`
-      : `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up ${pts(best.lift)} ${best.lift >= 0 ? "more" : "less"} often in answers that pick ${yo()} than in answers that pick a rival. Answers that pick a rival bring up ${worst.code} ${worst.lift <= 0 ? "more" : "less"} (${pts(worst.lift)}).`,
+      : `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up ${pts(best.wins, best.others)} ${best.lift >= 0 ? "more" : "less"} often in answers that pick ${yo()} than in answers that pick a rival. Answers that pick a rival bring up ${worst.code} ${worst.lift <= 0 ? "more" : "less"} (${pts(worst.wins, worst.others)}).`,
     foot: `${best.code}: ${pct(best.wins)} of ${best.wins.n} wins vs ${pct(best.others)} of ${best.others.n} rival picks. ${worst.code}: ${pct(worst.wins)} vs ${pct(worst.others)}.`,
     look: { pill: "why", label: "Why" },
     effect: best.lift - worst.lift,
     viz: vizOf([
-      W("you", withRefs(insightBar("In your picks", best.wins, undefined, true), ex?.argued(best.code, "you"))),
-      W("rival", withRefs(insightBar("In rivals' picks", best.others), ex?.argued(best.code, "others"))),
+      W("you", insightBar("In your picks", best.wins, undefined, true)),
+      W("rival", insightBar("In rivals' picks", best.others)),
     ]),
     names: { topic: best.code },
   };
 }
 
-function doubtRollup(s: Summary, ex?: ExampleIndex): Insight | null {
+function doubtRollup(s: Summary): Insight | null {
   const b = s.buyersDoubt;
   const c = s.customersDoubt;
   if (!b && !c) return null;
@@ -1172,10 +690,10 @@ function doubtRollup(s: Summary, ex?: ExampleIndex): Insight | null {
     look: { pill: "stations", station: b ? "doubts" : "customer_base", label: b ? "Stations - Doubts" : "Stations - Customers" },
     effect,
     viz: vizOf([
-      b && W("you", withRefs(insightBar("Buyers told to go ahead", b.proceed), ex?.doubt("objections", (r) => r.code.proceed_or_avoid === "proceed"))),
-      b && W("other", withRefs(insightBar("Agrees with buyers' worries", b.agree), ex?.doubt("objections", (r) => r.code.premise_verdict === "confirms"))),
-      c && W("you", withRefs(insightBar("Customers told to stay", c.keep), ex?.doubt("keep", (r) => r.code.keep_or_leave === "keep"))),
-      c && W("other", withRefs(insightBar("Customers told to leave", c.leave), ex?.doubt("keep", (r) => r.code.keep_or_leave === "leave"))),
+      b && W("you", insightBar("Buyers told to go ahead", b.proceed)),
+      b && W("other", insightBar("Agrees with buyers' worries", b.agree)),
+      c && W("you", insightBar("Customers told to stay", c.keep)),
+      c && W("other", insightBar("Customers told to leave", c.leave)),
     ]),
     names: { variant: (c && rate(c.leave) > rate(c.keep)) || (b && rate(b.avoid) > rate(b.proceed)) ? "loses" : "holds" },
   };
@@ -1188,12 +706,12 @@ function doubtWorry(inp: InsightInputs): Insight | null {
   const k = inp.doubt.keepOrLeave;
   if (o) for (const row of o.rows) cands.push({ row, pool: o.premise.confirms, who: "buyer" });
   if (k) for (const row of k.rows) cands.push({ row, pool: k.premise.confirms, who: "customer" });
-  const ok = cands.filter((c) => c.row.premise.confirms.n >= MIN_BASE);
+  const ok = cands.filter((c) => enough(c.row.premise.confirms));
   if (ok.length < 2) return null;
   const top = [...ok].sort((a, b) => rate(b.row.premise.confirms) - rate(a.row.premise.confirms))[0];
   const gap = rate(top.row.premise.confirms) - rate(top.pool);
   // The pool contains the worry, so the test is the worry's range clearing the pool's rate.
-  if (top.row.premise.confirms.low <= rate(top.pool)) return null;
+  if (!gLowAbove(top.row.premise.confirms, rate(top.pool))) return null;
   return {
     key: "doubt_worry",
     kind: "doubt",
@@ -1207,25 +725,22 @@ function doubtWorry(inp: InsightInputs): Insight | null {
     viz: vizOf([
       W(
         "you",
-        withRefs(
-          insightBar(lbl(top.row.concern), top.row.premise.confirms, undefined, true),
-          inp.ex?.doubt(top.who === "buyer" ? "objections" : "keep", (r) => worryKey(r) === top.row.key && r.code.premise_verdict === "confirms")
-        )
+        insightBar(lbl(top.row.concern), top.row.premise.confirms, undefined, true)
       ),
-      W("other", withRefs(insightBar(`All ${top.who}s' worries`, top.pool), inp.ex?.doubt(top.who === "buyer" ? "objections" : "keep", (r) => r.code.premise_verdict === "confirms"))),
+      W("other", insightBar(`All ${top.who}s' worries`, top.pool)),
     ]),
     names: { worry: top.row.concern },
   };
 }
 
-function funnelDrop(s: Summary, ex?: ExampleIndex): Insight | null {
-  if (s.answers < MIN_BASE) return null;
+function funnelDrop(s: Summary): Insight | null {
+  if (!enough(s.target.mentioned)) return null;
   const named = rate(s.target.mentioned);
   const rec = rate(s.target.recommended);
   const picked = rate(s.target.chosen);
   const steps = [
-    { from: "named", to: "recommended", a: named, b: rec },
-    { from: "recommended", to: "picked", a: rec, b: picked },
+    { from: "named", to: "recommended", a: named, b: rec, ca: s.target.mentioned, cb: s.target.recommended },
+    { from: "recommended", to: "picked", a: rec, b: picked, ca: s.target.recommended, cb: s.target.chosen },
   ];
   const worst = steps.sort((x, y) => y.a - y.b - (x.a - x.b))[0];
   const drop = worst.a - worst.b;
@@ -1235,15 +750,15 @@ function funnelDrop(s: Summary, ex?: ExampleIndex): Insight | null {
     kind: "funnel",
     title: `The drop is from ${worst.from} to ${worst.to}`,
     body: STYLE
-      ? `When buyers ask what to buy, ${STYLE.name} is ${worst.from} in ${pct(worst.a)} of answers but ${worst.to} in ${worst.to === "picked" ? pctFine(worst.b) : pct(worst.b)}; no other step loses as many answers.`
-      : `When buyers ask what to buy, you are ${worst.from} in ${pct(worst.a)} of answers but ${worst.to} in ${worst.to === "picked" ? pctFine(worst.b) : pct(worst.b)} - the biggest step down in the funnel.`,
+      ? `When buyers ask what to buy, ${STYLE.name} is ${worst.from} in ${pct(worst.ca)} of answers but ${worst.to} in ${worst.to === "picked" ? pfine(worst.cb) : pct(worst.cb)}; no other step loses as many answers.`
+      : `When buyers ask what to buy, you are ${worst.from} in ${pct(worst.ca)} of answers but ${worst.to} in ${worst.to === "picked" ? pfine(worst.cb) : pct(worst.cb)} - the biggest step down in the funnel.`,
     foot: `Named ${counts(s.target.mentioned)}; recommended ${counts(s.target.recommended)}; picked ${counts(s.target.chosen)}.`,
     look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
     effect: drop,
     viz: vizOf([
-      W("you", withRefs(insightBar("Named", named), ex?.named(s.target.key))),
-      W("you", withRefs(insightBar("Recommended", rec, undefined, worst.to === "recommended"), ex?.recommended(s.target.key))),
-      W("you", withRefs(insightBar("Picked", picked, pctFine(picked), worst.to === "picked"), ex?.picks(s.target.key))),
+      W("you", insightBar("Named", s.target.mentioned)),
+      W("you", insightBar("Recommended", s.target.recommended, undefined, worst.to === "recommended")),
+      W("you", insightBar("Picked", s.target.chosen, pfine(s.target.chosen), worst.to === "picked")),
     ]),
   };
 }
@@ -1251,20 +766,20 @@ function funnelDrop(s: Summary, ex?: ExampleIndex): Insight | null {
 /** The prompted head-to-head record pooled over the entity rivals, with the
  * hardest matchup (lowest win share) that clears the floor. */
 function promptedRecord(s: Summary): { pooled: RateCell; won: number; lost: number; hardest: Summary["headToHead"][number] | null } | null {
-  const won = s.headToHead.reduce((a, r) => a + r.won.k, 0);
-  const lost = s.headToHead.reduce((a, r) => a + r.lost.k, 0);
-  if (won + lost < MIN_BASE) return null;
-  const ok = s.headToHead.filter((r) => r.winOfDecided.n >= MIN_BASE);
-  const hardest = ok.length ? [...ok].sort((a, b) => rate(a.winOfDecided) - rate(b.winOfDecided))[0] : null;
-  return { pooled: cell(won, won + lost), won, lost, hardest };
+  // The pooled record is its own fact (every named rival's matchups, the question's own rival on each answer).
+  const pooled = s.headToHeadAll;
+  if (!pooled || !enough(pooled)) return null;
+  const ok = s.headToHead.filter((r) => enough(r.winOfDecided));
+  const hardest = hardestOf(ok);
+  return { pooled, won: pooled.k, lost: pooled.n - pooled.k, hardest };
 }
 
-function promptedVsOpen(s: Summary, ex?: ExampleIndex): Insight | null {
+function promptedVsOpen(s: Summary): Insight | null {
   const rec = promptedRecord(s);
   const open = s.target.shareOfDecided;
-  if (!rec || open.n < MIN_BASE) return null;
+  if (!rec || !enough(open)) return null;
   const gap = rate(rec.pooled) - rate(open);
-  if (Math.abs(gap) < 0.15) return null;
+  if (!gGap(rec.pooled, open, OF.promptedGap)) return null;
   if (!(gap > 0 ? apart(rec.pooled, open) : apart(open, rec.pooled))) return null;
   const hard = rec.hardest;
   const hardText = hard ? ` (${pct(hard.winOfDecided)} against ${hard.rival})` : "";
@@ -1280,9 +795,9 @@ function promptedVsOpen(s: Summary, ex?: ExampleIndex): Insight | null {
     look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
     effect: Math.abs(gap),
     viz: vizOf([
-      W("you", withRefs(insightBar("Direct matchups won", rec.pooled), ex?.h2hWins())),
-      W("you", withRefs(insightBar("Share of picks when buyers ask", open, undefined, true), ex?.picks(s.target.key))),
-      hard && W("you", withRefs(insightBar(`Against ${hard.rival}`, hard.winOfDecided), ex?.h2hWins({ rivalKey: hard.key }))),
+      W("you", insightBar("Direct matchups won", rec.pooled)),
+      W("you", insightBar("Share of picks when buyers ask", open, undefined, true)),
+      hard && W("you", insightBar(`Against ${hard.rival}`, hard.winOfDecided)),
     ]),
     names: { variant: gap > 0 ? "matchups" : "open" },
   };
@@ -1291,12 +806,13 @@ function promptedVsOpen(s: Summary, ex?: ExampleIndex): Insight | null {
 /** The room the target's open-choice picks come from most. */
 function roomConcentration(s: Summary, inp: InsightInputs) {
   const total = s.target.chosen.k;
-  if (total < MIN_BASE || inp.rooms.length < 2) return null;
+  if (!inp.F || inp.rooms.length < 2) return null;
   const top = [...inp.rooms].sort((a, b) => b.picks - a.picks || a.room.localeCompare(b.room))[0];
-  const share = top.picks / total;
-  if (share < 0.5) return null;
-  const outside = cell(total - top.picks, Math.max(0, s.firmPickInCategory.k - top.firm));
-  return { top, share, total, outside, rooms: inp.rooms.length };
+  // Of your picks, the share from that buying situation; your share of the picks everywhere else - two facts.
+  const shareC = inp.F.fact("slice_share", `ai/slice:${sitSlice(top.room)}`, { ...inp.F.wtb, when: "pick:you" });
+  if (!enough(shareC) || !gAtLeast(shareC, OF.roomConcentration)) return null;
+  const outside = inp.F.fact("share_of_picks", "you", { ...inp.F.wtb, when: `!${sitSlice(top.room)}` });
+  return { top, share: rate(shareC), shareC, total, outside, rooms: inp.rooms.length };
 }
 
 function pickConcentrationRoom(s: Summary, inp: InsightInputs): Insight | null {
@@ -1314,14 +830,14 @@ function pickConcentrationRoom(s: Summary, inp: InsightInputs): Insight | null {
           const all = STYLE.roomShare!(null);
           return here ? `When ${buyer(c.top.room)} asks what to buy, ${STYLE.name} takes ${here} of the picks${all ? `, against ${all} across all buyers` : ""}.` : "";
         })()
-      : `${pct(c.share)} of the times the AI picks ${s.brand} when buyers ask what to buy come from one buying situation, ${buyer(c.top.room)} - there ${yt("you take", (n) => `${n} takes`)} ${pct(c.top.decided)} of the picks, everywhere else ${pct(c.outside)}.`,
+      : `${pct(c.shareC)} of the times the AI picks ${s.brand} when buyers ask what to buy come from one buying situation, ${buyer(c.top.room)} - there ${yt("you take", (n) => `${n} takes`)} ${pct(c.top.decided)} of the picks, everywhere else ${pct(c.outside)}.`,
     foot: `${c.top.picks} of ${c.total} picks from ${c.top.room} (one of ${c.rooms} rooms). Inside: ${counts(c.top.decided)}. Outside: ${counts(c.outside)}.`,
     look: { pill: "buyers", label: "Buyers" },
     effect: c.share - 1 / c.rooms,
     viz: vizOf([
-      W("you", withRefs(insightBar(`Your picks from ${lbl(c.top.room, 32)}`, c.share, undefined, true), inp.ex?.picks(s.target.key, { room: c.top.room }))),
-      W("you", withRefs(insightBar(`Share of picks there`, c.top.decided), inp.ex?.picks(s.target.key, { room: c.top.room }))),
-      W("you", withRefs(insightBar("Share of picks elsewhere", c.outside), inp.ex?.picks(s.target.key, { notRoom: c.top.room }))),
+      W("you", insightBar(`Your picks from ${lbl(c.top.room, 32)}`, c.shareC, undefined, true)),
+      W("you", insightBar(`Share of picks there`, c.top.decided)),
+      W("you", insightBar("Share of picks elsewhere", c.outside)),
     ]),
     names: { buyer: c.top.room },
   };
@@ -1343,12 +859,12 @@ const quoteQuestion = (t: string) => shorten(t, QUOTE_MAX);
 
 /** The question (cell) a brand's picks concentrate in, for the target and the top rival. */
 function questionConcentration(s: Summary, inp: InsightInputs, key: string) {
-  const total = inp.questions.reduce((a, q) => a + (q.picks[key] ?? 0), 0);
-  if (total < MIN_BASE || inp.questions.length < 2) return null;
+  if (!inp.F || inp.questions.length < 2) return null;
   const top = [...inp.questions].sort((a, b) => (b.picks[key] ?? 0) - (a.picks[key] ?? 0) || a.id.localeCompare(b.id))[0];
-  const k = top.picks[key] ?? 0;
-  const share = k / total;
-  return share >= 0.3 ? { top, k, total, share, n: inp.questions.length } : null;
+  // Of the brand's picks, the share from that one question - one fact.
+  const shareC = inp.F.fact("slice_share", `ai/slice:cell:${top.id}`, { ...inp.F.wtb, when: `pick:${key === s.target.key ? "you" : key}` });
+  if (!enough(shareC) || !gAtLeast(shareC, OF.questionConcentration)) return null;
+  return { top, k: shareC.k, total: shareC.n, share: rate(shareC), shareC, n: inp.questions.length };
 }
 
 function pickConcentrationQuestion(s: Summary, inp: InsightInputs): Insight | null {
@@ -1366,13 +882,13 @@ function pickConcentrationQuestion(s: Summary, inp: InsightInputs): Insight | nu
     kind: "question",
     title: best.isTarget ? `One question carries ${yr()} picks` : `One question carries ${best.who}'s picks`,
     // bf35: no card is per question, so the Brief does not cite this finding.
-    body: STYLE?.roomShare ? "" : `${pct(c.share)} of ${best.isTarget ? yr() : `${best.who}'s`} picks come from one question: "${q}"`,
+    body: STYLE?.roomShare ? "" : `${pct(c.shareC)} of ${best.isTarget ? yr() : `${best.who}'s`} picks come from one question: "${q}"`,
     foot: `${c.k} of ${c.total} picks of ${best.who} from this question (one of ${c.n} open-choice questions, ${c.top.answers} answers, a seed and its paraphrases pooled).`,
     look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
     effect: c.share - 1 / c.n,
     viz: vizOf([
-      W(best.isTarget ? "you" : "rival", withRefs(insightBar("Picks from this question", c.share, undefined, true), inp.ex?.picks(best.key, { intentId: c.top.id }))),
-      W("other", insightBar("If spread evenly", 1 / c.n)),
+      W(best.isTarget ? "you" : "rival", insightBar("Picks from this question", c.shareC, undefined, true)),
+      W("other", insightBar("If spread evenly", 1 / c.n, pd("even", [], c.n))),
     ]),
     names: best.isTarget ? { variant: "you" } : { variant: "rival", rival: best.who },
   };
@@ -1385,7 +901,7 @@ function agreedYetStay(inp: InsightInputs): Insight | null {
   const k = inp.doubt.keepOrLeave;
   if (o) cands.push({ who: "buyer", kind: "objections", confirmed: o.premise.confirms, given: o.matrix.confirms.proceed, verb: "go ahead" });
   if (k) cands.push({ who: "customer", kind: "keep", confirmed: k.premise.confirms, given: k.matrix.confirms.keep, verb: "stay" });
-  const ok = cands.filter((c) => c.confirmed.n >= MIN_BASE && c.given.n >= MIN_BASE && rate(c.confirmed) >= 0.5 && rate(c.given) >= 0.3);
+  const ok = cands.filter((c) => enough(c.confirmed) && enough(c.given) && gAtLeast(c.confirmed, OF.agreedShare) && gAtLeast(c.given, OF.agreedGiven));
   if (ok.length === 0) return null;
   const best = ok.sort((a, b) => rate(b.confirmed) * rate(b.given) - rate(a.confirmed) * rate(a.given))[0];
   return {
@@ -1397,13 +913,10 @@ function agreedYetStay(inp: InsightInputs): Insight | null {
     look: { pill: "stations", station: best.who === "buyer" ? "doubts" : "customer_base", label: best.who === "buyer" ? "Stations - Doubts" : "Stations - Customers" },
     effect: rate(best.confirmed) * rate(best.given),
     viz: vizOf([
-      W("other", withRefs(insightBar("Agrees the worry is fair", best.confirmed), inp.ex?.doubt(best.kind, (r) => r.code.premise_verdict === "confirms"))),
+      W("other", insightBar("Agrees the worry is fair", best.confirmed)),
       W(
         "you",
-        withRefs(
-          insightBar(`Still told to ${best.verb}`, best.given, undefined, true),
-          inp.ex?.doubt(best.kind, (r) => r.code.premise_verdict === "confirms" && (best.kind === "objections" ? r.code.proceed_or_avoid === "proceed" : r.code.keep_or_leave === "keep"))
-        )
+        insightBar(`Still told to ${best.verb}`, best.given, undefined, true)
       ),
     ]),
   };
@@ -1436,7 +949,7 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
     parts.push(
       STYLE
         ? `${untaught.code} comes up in ${pz(untaught.wins)} of the answers that pick ${STYLE.name} and ${pz(untaught.others)} of those that pick a rival, but is not among the five things the AI most often tells buyers to look for`
-        : `${untaught.code} comes up ${pts(untaught.lift)} more often when you win but is not among the five things the AI most often tells buyers to look for`
+        : `${untaught.code} comes up ${pts(untaught.wins, untaught.others)} more often when you win but is not among the five things the AI most often tells buyers to look for`
     );
     const tr = taughtOf(untaught.code);
     foot.push(`${untaught.code}: ${pct(untaught.wins)} of wins vs ${pct(untaught.others)} of rival picks; taught in ${tr ? counts(tr) : "no"} criteria answers.`);
@@ -1445,7 +958,7 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
     parts.push(
       STYLE
         ? `${untaught ? "it" : "the AI"} tells buyers to look for ${losing.code}, which comes up in ${pz(losing.others)} of the answers that pick a rival and ${pz(losing.wins)} of those that pick ${STYLE.name}`
-        : `${untaught ? "it" : "the AI"} tells buyers to look for ${losing.code}, which shows up more when a rival is picked (-${pts(losing.lift)})`
+        : `${untaught ? "it" : "the AI"} tells buyers to look for ${losing.code}, which shows up more when a rival is picked (${pd("diff_signed", [losing.wins, losing.others])})`
     );
     foot.push(`${losing.code}: ${pct(losing.wins)} of wins vs ${pct(losing.others)} of rival picks; taught in ${counts(taughtOf(losing.code)!)}.`);
   }
@@ -1465,8 +978,8 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
       const x = untaught ?? losing!;
       const tr = taughtOf(x.code);
       return vizOf([
-        W("you", withRefs(insightBar("In your picks", x.wins, undefined, true), inp.ex?.argued(x.code, "you"))),
-        W("rival", withRefs(insightBar("In rivals' picks", x.others), inp.ex?.argued(x.code, "others"))),
+        W("you", insightBar("In your picks", x.wins, undefined, true)),
+        W("rival", insightBar("In rivals' picks", x.others)),
         tr && W("other", insightBar("In what the AI teaches buyers", tr)),
       ]);
     })(),
@@ -1475,25 +988,29 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
 }
 
 function valueInHouse(inp: InsightInputs, brand: string): Insight | null {
+  // Ruling 3: each price answer in one bucket - a rival, else only the brand's own cheaper option, else nowhere -
+  // as shares of ALL the price answers.
   const v = inp.value;
-  if (!v || v.ownRung.n < MIN_BASE) return null;
+  if (!v || !enough(v.ownRung)) return null;
   const own = rate(v.ownRung);
   const riv = rate(v.recommendsInstead);
-  if (own < 0.3 && riv < 0.3) return null;
-  const inHouse = own >= riv;
+  if (!gAtLeast(v.ownRung, OF.valueSide) && !gAtLeast(v.recommendsInstead, OF.valueSide)) return null;
+  const ladder = !!inp.F?.rf.set.ladder;
+  const inHouse = ladder && own >= riv;
   const top = v.instead.find((i) => i.own === inHouse);
   const topText = top ? ` - most often ${top.name}` : "";
   return {
     key: "value_in_house",
     kind: "value",
-    title: inHouse ? "The value doubts stay in-house" : "The value doubts go to rivals",
+    title: inHouse ? "On price, the AI points to your own cheaper option" : "On price, the AI points to rivals",
+    // A brand that sells no ladder of its own lines has no own cheaper option to name (ruling 3's own bucket).
     body: inHouse
-      ? `When the AI doubts ${brand} is worth the price, ${pct(own)} of those answers point to its own cheaper option${topText}; ${pct(riv)} point to a rival.`
-      : `When the AI doubts ${brand} is worth the price, ${pct(riv)} of those answers point to a rival${topText}; ${pct(own)} point to its own cheaper option.`,
-    foot: `Of answers saying no or it depends: own option ${counts(v.ownRung)}; a rival ${counts(v.recommendsInstead)}.${top ? ` ${top.name}: ${top.n}.` : ""}`,
+      ? `Asked whether ${brand} is worth the price, the AI points the buyer to only its own cheaper option in ${pct(v.ownRung)} of answers${topText}, and to a rival in ${pct(v.recommendsInstead)}.`
+      : `Asked whether ${brand} is worth the price, the AI points the buyer to a rival in ${pct(v.recommendsInstead)} of answers${topText}${ladder ? `, and to only its own cheaper option in ${pct(v.ownRung)}` : ""}.`,
+    foot: `Of every price answer: only your own cheaper option ${counts(v.ownRung)}; a rival ${counts(v.recommendsInstead)}.${top ? ` ${top.name}: ${top.n}.` : ""}`,
     look: { pill: "stations", station: "value", label: "Stations - Value" },
     effect: Math.abs(own - riv),
-    viz: vizOf([W("you", insightBar("Your own cheaper option", own, undefined, inHouse)), W("rival", insightBar("A rival", riv, undefined, !inHouse))]),
+    viz: vizOf([ladder && W("you", insightBar("Your own cheaper option", v.ownRung, undefined, inHouse)), W("rival", insightBar("A rival", v.recommendsInstead, undefined, !inHouse)), !ladder && W("other", insightBar("Nowhere", inp.F!.fact("instead_nowhere", "ai", { types: ["pricing"] })))]),
     names: { variant: inHouse ? "own" : "rivals" },
   };
 }
@@ -1506,7 +1023,7 @@ function advocacyVsObjection(inp: InsightInputs): Insight | null {
   const strong = adv.caseStrength.strong;
   const defend = rate(strengthens) >= rate(strong) ? strengthens : strong;
   const confirms = o.premise.confirms;
-  if (defend.n < MIN_BASE || confirms.n < MIN_BASE || rate(defend) < 0.5 || rate(confirms) < 0.5) return null;
+  if (!enough(defend) || !enough(confirms) || !gAtLeast(defend, OF.advocacyShare) || !gAtLeast(confirms, OF.advocacyShare)) return null;
   return {
     key: "advocacy_vs_objection",
     kind: "doubt",
@@ -1517,28 +1034,24 @@ function advocacyVsObjection(inp: InsightInputs): Insight | null {
     effect: Math.min(rate(defend), rate(confirms)) - 0.5,
     viz: vizOf([
       W("you", insightBar("Makes the case when asked", defend)),
-      W("other", withRefs(insightBar("Agrees with buyers' worries", confirms), inp.ex?.doubt("objections", (r) => r.code.premise_verdict === "confirms"))),
+      W("other", insightBar("Agrees with buyers' worries", confirms)),
     ]),
   };
 }
 
 /* ------------------------------ bs7: switching ----------------------------- */
 
-/** A capture share this low on rival leavers who hear about you is "never taken". */
-const LEAVER_NEVER = 0.05;
-/** The share of leavers' answers naming you before "heard about" is the read. */
-const LEAVER_NAMED = 0.5;
 
 function leaverCapture(inp: InsightInputs): Insight | null {
   const o = inp.alternatives.offensive;
-  if (!o || o.answers < MIN_BASE) return null;
+  if (!o || !enough(o.overall.named)) return null;
   const t = o.overall;
   const you = o.captors.find((c) => c.role === "target") ?? null;
   const takers = o.captors.filter((c) => c.chosen.k > 0);
   const decided = takers.length ? takers[0].shareOfDecided.n : 0;
   const lead = takers[0] ?? null;
   // Strength: you are the brand rival leavers are sent to most.
-  if (you && lead && lead.role === "target" && decided >= MIN_BASE && takers.length >= 2) {
+  if (you && lead && lead.role === "target" && decided >= MIN_BASE && enough(you.shareOfDecided) && takers.length >= 2) {
     const sources = o.rows.filter((r) => r.answers >= MIN_BASE && r.key !== "generic");
     const src = [...sources].sort((a, b) => rate(b.captured) - rate(a.captured) || a.rival.localeCompare(b.rival))[0];
     const second = takers.find((c) => c.role !== "target");
@@ -1559,7 +1072,7 @@ function leaverCapture(inp: InsightInputs): Insight | null {
     };
   }
   // Tension: leavers hear about you and are almost never told to take you.
-  if (rate(t.named) >= LEAVER_NAMED && rate(t.captured) < LEAVER_NEVER && apart(t.named, t.captured)) {
+  if (gAtLeast(t.named, OF.leaverNamed) && gBelow(t.captured, OF.leaverNever) && apart(t.named, t.captured)) {
     const other = takers.find((c) => c.role !== "target") ?? null;
     return {
       key: "leaver_capture",
@@ -1580,13 +1093,13 @@ function leaverCapture(inp: InsightInputs): Insight | null {
 
 function ownDefense(inp: InsightInputs): Insight | null {
   const d = inp.alternatives.defensive;
-  if (!d || d.answers < MIN_BASE) return null;
+  if (!d || !enough(d.verdicts.keep)) return null;
   const top = d.destinations[0];
   const keep = d.verdicts.keep;
-  if (!top || rate(top.offered) < 0.5 || rate(keep) >= 0.5) return null;
+  if (!top || !gAtLeast(top.offered, OF.ownDefenseShown) || !gBelow(keep, OF.ownDefenseShown)) return null;
   // Exits shown about as often as the top one are named with it (a list of
   // alternatives often carries the same two or three brands every time).
-  const tied = d.destinations.filter((x) => rate(top.offered) - rate(x.offered) <= 0.05).slice(0, 3);
+  const tied = d.destinations.filter((x) => rate(top.offered) - rate(x.offered) <= OF.ownDefenseTiedPts).slice(0, 3);
   const names = tied.map((x) => x.name);
   const who = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
   return {
@@ -1617,56 +1130,52 @@ const AWAY_MIN_RULES = 15;
 /** A brand the AI almost never picks in the open choice. */
 const BLOCKER_SHARE = 0.02;
 
+/**
+ * Ruling 10 (2026-11-17): the condition that sends buyers away is counted inside ONE question type - the What to buy
+ * card's own away rows, every share of all the card's answers (ruling 4) - and the finding opens on that card. The
+ * lead is the card's first row; a fixed situation (a possession-shaped row) and a blocker (a row naming a brand the AI
+ * almost never picks) are that card's rows too, each with its own share.
+ */
 function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
-  const a = inp.away;
-  if (!a || a.cells === 0) return null;
-  if (a.lead) return awayConditionThemed(s, a, a.lead);
-  const g = a.groups[0];
-  if (!g || g.rules < AWAY_MIN_RULES) return null;
-  const spread = g.cells / a.cells;
-  const to = g.routes[0];
+  const rows = inp.away?.rows ?? [];
+  const lead = rows[0];
+  if (!lead || !gK(lead.share, OF.awayLeadMin)) return null;
+  const dest = destOf(lead.routes, lead.routed);
+  const to = lead.routes[0];
+  // A blocker: the lead row names a brand that almost never wins when buyers ask what to buy.
   let blocker = "";
   let blockerFoot = "";
-  if (g.names && s.firmPickInCategory.k >= MIN_BASE && g.names.key !== s.target.key) {
-    const b = s.brands.find((x) => x.key === g.names!.key);
-    const share = b ? b.shareOfDecided : cell(0, s.firmPickInCategory.k);
-    if (rate(share) < BLOCKER_SHARE) {
-      blocker = `. It names ${g.names.name}, a brand with ${pct(share)} of the picks when buyers ask what to buy, so it blocks ${yo()} without winning for it`;
-      blockerFoot = ` ${g.names.name} in the open choice: ${counts(share)}.`;
+  let blockerBrief = "";
+  if (lead.names && lead.names.key !== s.target.key && enough(s.target.shareOfDecided)) {
+    const b = s.brands.find((x) => x.key === lead.names!.key);
+    const share = b ? b.shareOfDecided : inp.F?.fact("share_of_picks", lead.names.key, inp.F.wtb);
+    if (share && gBelow(share, OF.blockerShare)) {
+      blocker = ` It names ${lead.names.name}, a brand with ${pct(share)} of the picks, so it blocks ${yo()} without winning for it.`;
+      blockerBrief = ` That wording names ${lead.names.name}, a brand with ${pct(share)} of the picks when buyers ask what to buy, so it blocks ${yo()} without winning for it.`;
+      blockerFoot = ` ${lead.names.name}: ${counts(share)} of the picks.`;
     }
   }
-  // The wall variant: the top group is possession-shaped, or a later one of
-  // the top groups that clears the same floor is.
-  const laterWall = !g.wall ? a.groups.slice(1).find((x) => x.wall && x.rules >= AWAY_MIN_RULES) ?? null : null;
-  const wall = g.wall
-    ? blocker
-      ? ""
-      : " - a situation the buyer is already in, not an argument to answer"
-    : laterWall
-      ? `; the largest fixed situation among them, "${qc(shorten(laterWall.label, 60))}", comes up in ${pct(laterWall.cells / a.cells)} of them - a situation the buyer is already in, not an argument to answer`
-      : "";
-  const wallFoot = laterWall ? ` "${laterWall.label}": at least ${laterWall.rules} rules across ${laterWall.cells} questions.` : "";
-  const toFoot = to ? `; to ${to.name} ${to.n}` : "";
-  const lower = `Counts are lower bounds: ${a.grouping === "stems" ? "conditions are grouped by their words, and" : ""} wordings the grouping did not join are left out.`;
+  // The largest fixed situation among the card's rows (the lead itself, or a later row with enough answers).
+  const w = rows.find((x) => x.wall && gK(x.share, OF.awaySpecificMin));
+  const fixed =
+    w === lead
+      ? " That is a situation the buyer is already in, not an argument to answer."
+      : w
+        ? ` The largest fixed situation, "${qc(shorten(w.label, 60))}", comes up in ${pct(w.share)} of those answers - a situation the buyer is already in, not an argument to answer.`
+        : "";
+  const put = !sameWords(lead.wording, lead.label) ? `, most often put as "${qc(shorten(lead.wording))}"` : "";
   return {
     key: "away_condition",
     kind: "condition",
-    title: g.wall ? `A fixed situation sends buyers away: "${qc(shorten(g.label, 60))}"` : `What sends buyers away most: "${qc(shorten(g.label, 60))}"`,
+    title: lead.wall ? `A fixed situation sends buyers away: "${qc(shorten(lead.label, 60))}"` : `What sends buyers away most: "${qc(shorten(lead.label, 60))}"`,
     body: STYLE?.awayRow
-      ? awayBrief(
-          [g.label],
-          g.label,
-          to ? [to.name] : [],
-          to ? `to ${to.name}` : "",
-          `${blocker ? `${blocker.replace(/^\. /, " ")}.` : ""}${g.wall && !blocker ? " That is a situation the buyer is already in, not an argument to answer." : laterWall ? ` The largest fixed situation among them, "${qc(shorten(laterWall.label, 60))}", is a situation the buyer is already in, not an argument to answer.` : ""}`
-        )
-      : `The condition that most often sends buyers away from ${yo()} is "${qc(shorten(g.label))}"${to ? `, and the AI sends them to ${to.name}` : ""}; it comes up in ${pct(spread)} of the questions where the AI gives any condition that sends buyers away${blocker}${wall}.`,
-    foot: `At least ${g.rules} rules in ${g.answers} answers across ${g.cells} of ${a.cells} questions where the AI gives a condition that sends buyers away${toFoot}.${blockerFoot}${wallFoot} ${lower}`,
+      ? awayBrief([lead.label], lead.label, dest ? dest.names : [], dest ? destPhrase(dest) : "", `${w === lead ? " That is a situation the buyer is already in, not an argument to answer." : ""}${blockerBrief}${w && w !== lead ? ` The largest fixed situation, "${qc(shorten(w.label, 60))}", is a situation the buyer is already in, not an argument to answer.` : ""}`)
+      : `When buyers ask what to buy, the condition that most often sends them away from ${yo()} is "${qc(shorten(lead.label))}"${dest ? `, and the AI sends them ${destPhrase(dest)}` : ""}: it comes up in ${pct(lead.share)} of those answers${put}.${fixed}${blocker}`,
+    foot: `${counts(lead.share)} of the What to buy answers state "${lead.label}"${to ? `; ${to.n} of them send buyers to ${to.name}` : ""}.${blockerFoot}${w && w !== lead ? ` "${w.label}": ${counts(w.share)}.` : ""}`,
     look: { pill: "why", label: "Why - decision rules" },
-    effect: spread,
-    // Each bar is a condition that sends buyers to someone else - the rivals' side.
-    viz: vizOf(a.groups.map((x, i) => W("rival", insightBar(lbl(x.label, 40), x.cells / a.cells, undefined, i === 0)))),
-    names: { variant: g.wall ? "fixed" : "argument", condition: shorten(g.label, 60), ...(to ? { rival: to.name } : {}) },
+    effect: rate(lead.share),
+    viz: vizOf(rows.slice(0, 3).map((x, i) => W("rival", insightBar(lbl(x.label, 40), x.share, undefined, i === 0)))),
+    names: { variant: lead.wall ? "fixed" : "argument", condition: shorten(lead.label, 60), ...(dest ? { rival: listNames(dest.names) } : {}) },
   };
 }
 
@@ -1728,61 +1237,7 @@ export function awaySpecifics(
   return { blocker, fixed };
 }
 
-function awayConditionThemed(s: Summary, a: NonNullable<InsightInputs["away"]>, lead: NonNullable<NonNullable<InsightInputs["away"]>["lead"]>): Insight | null {
-  if (lead.base === 0 || lead.answers < MIN_BASE) return null;
-  const sh = lead.answers / lead.base;
-  const to = lead.routes[0];
-  const dest = destOf(lead.routes, lead.answers);
-  // bs21: the specific situations share the headline's answer base (one denominator per finding).
-  const ansOf = (x: { answers: number }) => pctShare(x.answers / lead.base);
-  const aPhrase = "of the answers that give any condition for choosing someone else";
-  const { blocker: bk, fixed: w } = awaySpecifics(s, a);
-  let blocker = "";
-  let blockerFoot = "";
-  if (bk) {
-    const g = bk.group;
-    const who = sameWords(g.label, lead.wording) ? "That wording" : `One wording, "${qc(shorten(g.label))}",`;
-    blocker = ` ${who} names ${g.names!.name}, a brand with ${pct(bk.share)} of the picks when buyers ask what to buy, so it blocks ${yo()} without winning for it; on its own it comes up in ${ansOf(g)} ${aPhrase}.`;
-    blockerFoot = ` "${g.label}": ${g.answers} of the ${lead.base} answers; ${g.names!.name} when buyers ask what to buy: ${counts(bk.share)}.`;
-  }
-  // bs21: a fixed situation worded the same as the lead's quoted wording is
-  // folded - said once, right after the headline that quotes it.
-  const fold = !!w && sameWords(w.label, lead.wording);
-  const fixedFold =
-    w && fold
-      ? ` That wording is a situation the buyer is already in, not an argument to answer${ansOf(w) === pctShare(sh) ? "" : `; on its own it comes up in ${ansOf(w)} of those answers`}.`
-      : "";
-  const fixed = w && !fold ? ` The largest fixed situation, "${qc(shorten(w.label, 60))}", comes up in ${ansOf(w)} ${aPhrase} - a situation the buyer is already in, not an argument to answer.` : "";
-  const fixedFoot = w ? ` "${w.label}": ${w.answers} of the ${lead.base} answers.` : "";
-  const put = sameWords(lead.wording, lead.label) ? "" : `, most often put as "${qc(shorten(lead.wording))}"`;
-  return {
-    key: "away_condition",
-    kind: "condition",
-    title: lead.wall ? `A fixed situation sends buyers away: "${qc(shorten(lead.label, 60))}"` : `What sends buyers away most: "${qc(shorten(lead.label, 60))}"`,
-    body: STYLE?.awayRow
-      ? awayBrief(
-          // bf36: one condition, one name - the theme's, as the finding's title names it.
-          [lead.label],
-          lead.label,
-          dest ? dest.names : [],
-          dest ? destPhrase(dest) : "",
-          `${w && fold ? " That is a situation the buyer is already in, not an argument to answer." : ""}${bk ? ` ${sameWords(bk.group.label, lead.wording) ? "That wording" : `One wording, "${qc(shorten(bk.group.label))}",`} names ${bk.group.names!.name}, a brand with ${pct(bk.share)} of the picks when buyers ask what to buy, so it blocks ${yo()} without winning for it.` : ""}${w && !fold ? ` The largest fixed situation, "${qc(shorten(w.label, 60))}", is a situation the buyer is already in, not an argument to answer.` : ""}`
-        )
-      : `The condition that most often sends buyers away from ${yo()} is "${qc(shorten(lead.label))}"${dest ? `, and the AI sends them ${destPhrase(dest)}` : ""}: it comes up in ${pctShare(sh)} ${aPhrase}${put}.${fixedFold}${blocker}${fixed}`,
-    foot: `${lead.answers} of ${lead.base} answers that give a condition for choosing someone else state "${lead.label}"${to ? `; ${to.n} of them send buyers to ${to.name}` : ""}.${blockerFoot}${fixedFoot} Counts leave out wordings only one answer states.`,
-    look: { pill: "why", label: "Why - decision rules" },
-    effect: sh,
-    viz: vizOf(lead.top.map((x, i) => W("rival", insightBar(lbl(x.label, 40), x.answers / lead.base, undefined, i === 0)))),
-    names: { variant: lead.wall ? "fixed" : "argument", condition: shorten(lead.label, 60), ...(dest ? { rival: listNames(dest.names) } : {}) },
-  };
-}
-
 /* --------------------- bs19: lost, with an exception --------------------- */
-
-/** The exception must come up in this many pooled lost answers ... */
-const EXC_MIN_ANSWERS = 15;
-/** ... and in at least this share of them. */
-const EXC_MIN_POOLED_SHARE = 0.2;
 
 /** bf35: the exception in the Brief's style - for the matchup it is most common in, with that head-to-head card's
  * own share ("who it still sends to you"), or no share when the card does not show it. */
@@ -1793,64 +1248,63 @@ function excBrief(brand: string, rival: string | null, labels: string[], label: 
     : `When the AI picks a rival over ${brand} in a direct matchup, its most common exception is "${qc(shorten(label))}".${fixed}`;
 }
 
+/**
+* Ruling 10 (2026-11-17): lost, with an exception - read on ONE lost matchup's card: its "Who it still sends to you"
+ * rows (the exception step), each a share of the answers that pick the rival in that matchup - the card's own fact id.
+ * It names the matchup the hardest-matchup finding names (hardestOf); if that matchup has no qualifying exception row,
+ * the lost matchup with the most answers that pick the rival that has one.
+ */
 function assignedException(s: Summary, inp: InsightInputs): Insight | null {
-  const e = inp.exception;
-  if (!e || e.matchups.length === 0 || e.lost < MIN_BASE) return null;
-  const g = e.groups[0];
-  if (!g || g.answers < EXC_MIN_ANSWERS || g.answers / e.lost < EXC_MIN_POOLED_SHARE) return null;
-  const sh = g.answers / e.lost;
-  const most = Object.entries(g.byRival).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
-  const one = e.matchups.length === 1;
-  if (g.themed) {
-    // bs20: counted on the run's reason themes - the theme by name, one wording inside it.
-    const where = one ? "" : most ? `, most of all against ${most[0]}` : "";
-    const put = g.wording && !sameWords(g.wording, g.label) ? ` It is most often put as "${qc(shorten(g.wording))}".` : "";
-    const fixed = g.wall ? " That is a situation the buyer is already in, not something to argue for." : "";
-    const open = e.open ? ` When buyers ask what to buy and the AI picks someone else, it still gives a case for ${s.brand} in ${pct(e.open)} of those answers.` : "";
-    return {
-      key: "assigned_exception",
-      kind: "condition",
-      title: one ? yt(`You lose to ${e.matchups[0].name} with one exception`, (n) => `${n} loses to ${e.matchups[0].name} directly, yet the AI still says when to choose it`) : yt("You lose these matchups with one exception", (n) => `The direct matchups ${n} loses still carry a case for it`),
-      body: STYLE?.exceptionRow ? excBrief(s.brand, one ? e.matchups[0].name : most?.[0] ?? null, [g.label, g.wording ?? g.label], g.label, fixed) : `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${qc(shorten(g.label))}" - stated in ${pctShare(sh)} of those answers${where}.${put}${fixed}${STYLE ? "" : open}`,
-      foot: `${g.answers} of ${e.lost} answers that pick the rival in the matchups you lose (${e.matchups.map((m) => `${m.name} ${m.lost}`).join(", ")}); ${e.any} of them state any case for you.${e.open ? ` When buyers ask what to buy: ${counts(e.open)}.` : ""} Counts leave out wordings only one answer states.`,
-      look: { pill: "why", label: "Why - decision rules" },
-      effect: sh,
-      // Each bar is a case the AI still gives for you - your side.
-      viz: vizOf(e.groups.map((x, i) => W("you", withRefs(insightBar(lbl(x.label, 40), x.answers / e.lost, undefined, i === 0), x.refs)))),
-      names: { ...(one ? { rival: e.matchups[0].name } : most ? { rival: most[0] } : {}), ...(STYLE ? { condition: qc(shorten(g.label)) } : {}) },
-    };
+  const cards = inp.exception?.cards ?? [];
+  type C = { card: (typeof cards)[number]; row: CardCondRow };
+  const cands: C[] = [];
+  for (const card of cards) {
+    if (!enough(card.lost)) continue;
+    const row = card.rows[0];
+    if (!row) continue;
+    // row.share is already of the answers that pick the rival (the card's exception rows).
+    if (!gK(row.share, OF.excMinAnswers) || !gAtLeast(row.share, OF.excMinShare)) continue;
+    cands.push({ card, row });
   }
-  const where = one ? "" : most ? `, most of all against ${most[0]}` : "";
-  const fixed = g.wall ? " That is a situation the buyer is already in, not something to argue for." : "";
-  const open = e.open ? ` When buyers ask what to buy and the AI picks someone else, it still gives a case for ${s.brand} in ${pct(e.open)} of those answers.` : "";
+  // The matchup the hardest-matchup finding names; if it has no qualifying exception row, the lost matchup with the
+  // most answers that pick the rival that does.
+  const hard = hardestOf(s.headToHead.filter((r) => enough(r.winOfDecided)));
+  const best = cands.find((c) => hard && c.card.key === hard.key) ?? [...cands].sort((a, b) => b.card.lost.k - a.card.lost.k || a.card.name.localeCompare(b.card.name))[0];
+  if (!best) return null;
+  const { card, row } = best;
+  const fixed = row.wall ? " That is a situation the buyer is already in, not something to argue for." : "";
+  const put = !sameWords(row.wording, row.label) ? ` It is most often put as "${qc(shorten(row.wording))}".` : "";
+  const openC = inp.F?.fact("slice_share", "ai/slice:cond:toward", { ...inp.F.wtb, when: "pick:other" });
+  const open = openC && enough(openC) ? ` When buyers ask what to buy and the AI picks someone else, it still gives a case for ${s.brand} in ${pct(openC)} of those answers.` : "";
   return {
     key: "assigned_exception",
     kind: "condition",
-    title: one ? yt(`You lose to ${e.matchups[0].name} with one exception`, (n) => `${n} loses to ${e.matchups[0].name} directly, yet the AI still says when to choose it`) : yt("You lose these matchups with one exception", (n) => `The direct matchups ${n} loses still carry a case for it`),
-    body: STYLE?.exceptionRow ? excBrief(s.brand, one ? e.matchups[0].name : most?.[0] ?? null, [g.label], g.label, fixed) : `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${qc(shorten(g.label))}" - stated in ${pctShare(sh)} of those answers${where}.${fixed}${STYLE ? "" : open}`,
-    foot: `${g.answers} of ${e.lost} answers that pick the rival in the matchups you lose (${e.matchups.map((m) => `${m.name} ${m.lost}`).join(", ")}); ${e.any} of them state any case for you.${e.open ? ` Open choice: ${counts(e.open)}.` : ""} Counts are lower bounds: wordings the grouping did not join are left out.`,
+    title: yt(`You lose to ${card.name} with one exception`, (n) => `${n} loses to ${card.name} directly, yet the AI still says when to choose it`),
+    body: STYLE?.exceptionRow
+      ? excBrief(s.brand, card.name, [row.label, row.wording], row.label, fixed)
+      : `When the AI picks ${card.name} over ${s.brand} in a direct matchup, it still says to choose ${s.brand} for buyers who say "${qc(shorten(row.label))}" - in ${pct(row.share)} of the answers that pick ${card.name}.${put}${fixed}${STYLE ? "" : open}`,
+    foot: `${counts(row.share)} answers that pick ${card.name} state "${row.label}"; ${card.any.k} of them state any case for you.${openC && enough(openC) ? ` When buyers ask what to buy: ${counts(openC)}.` : ""}`,
     look: { pill: "why", label: "Why - decision rules" },
-    effect: sh,
-    viz: vizOf(e.groups.map((x, i) => W("you", withRefs(insightBar(lbl(x.label, 40), x.answers / e.lost, undefined, i === 0), x.refs)))),
-    names: { ...(one ? { rival: e.matchups[0].name } : most ? { rival: most[0] } : {}), ...(STYLE ? { condition: qc(shorten(g.label)) } : {}) },
+    effect: rate(row.share),
+    // Each bar is a case the AI still gives for you - your side; shares of the answers that pick the rival.
+    viz: vizOf(card.rows.slice(0, 3).map((x, i) => W("you", insightBar(lbl(x.label, 40), x.share, undefined, i === 0)))),
+    names: { rival: card.name, ...(STYLE ? { condition: qc(shorten(row.label)) } : {}) },
   };
 }
 
 /* -------------------------------- bs7: engines ----------------------------- */
 
 /** Open-choice answers and in-category firm picks per mode. */
+/** One mode's commit rate and your share of its picks - the mode's own facts (summary.byMode). */
 function modeFirm(s: Summary, mode: "search" | "instinct") {
-  const list = s.byEngine.filter((e) => e.mode === mode);
-  const answers = list.reduce((x, e) => x + e.answers, 0);
-  const firm = list.reduce((x, e) => x + e.decided.n, 0);
-  const won = list.reduce((x, e) => x + e.decided.k, 0);
-  return { engines: list.length, firm: cell(firm, answers), decided: cell(won, firm) };
+  const m = s.byMode.find((x) => x.key === mode);
+  return { engines: m?.engines ?? 0, firm: (m?.firm ?? cell(0, 0)) as RateCell, decided: (m?.decided ?? cell(0, 0)) as RateCell };
 }
 
-function engineDecisiveness(s: Summary, ex?: ExampleIndex): Insight | null {
+function engineDecisiveness(s: Summary): Insight | null {
   const se = modeFirm(s, "search");
   const ins = modeFirm(s, "instinct");
-  if (se.firm.n < MIN_BASE || ins.firm.n < MIN_BASE) return null;
+  if (!enough(se.firm) || !enough(ins.firm)) return null;
   const [hi, lo] = rate(se.firm) >= rate(ins.firm) ? [se, ins] : [ins, se];
   if (!apart(hi.firm, lo.firm)) return null;
   const hiName = hi === se ? "with web search" : "without web search";
@@ -1872,17 +1326,17 @@ function engineDecisiveness(s: Summary, ex?: ExampleIndex): Insight | null {
     effect: rate(hi.firm) - rate(lo.firm),
     viz: vizOf([
       // How often the AI commits at all - any brand's pick, nobody's number.
-      W("other", withRefs(insightBar(hiName.charAt(0).toUpperCase() + hiName.slice(1), hi.firm), ex?.picks(null, { models: modelsOf(s, (e) => e.mode === (hi === se ? "search" : "instinct")) }))),
-      W("other", withRefs(insightBar(loName.charAt(0).toUpperCase() + loName.slice(1), lo.firm), ex?.picks(null, { models: modelsOf(s, (e) => e.mode === (hi === se ? "instinct" : "search")) }))),
+      W("other", insightBar(hiName.charAt(0).toUpperCase() + hiName.slice(1), hi.firm)),
+      W("other", insightBar(loName.charAt(0).toUpperCase() + loName.slice(1), lo.firm)),
     ]),
     names: { mode: hiName },
   };
 }
 
 /** The open-choice gap by mode that a head-to-head flip must run against. */
-const FLIP_MIN_OPEN = 0.05;
+const FLIP_MIN_OPEN = OF.flipMinOpen;
 
-function engineHeadToHeadFlip(s: Summary, ex?: ExampleIndex): Insight | null {
+function engineHeadToHeadFlip(s: Summary): Insight | null {
   const se = s.byMode.find((m) => m.key === "search");
   const ins = s.byMode.find((m) => m.key === "instinct");
   if (!se || !ins) return null;
@@ -1901,17 +1355,17 @@ function engineHeadToHeadFlip(s: Summary, ex?: ExampleIndex): Insight | null {
     look: { pill: "table", label: "Metrics - by mode" },
     effect: Math.abs(h2hGap),
     viz: vizOf([
-      W("you", withRefs(insightBar("Matchups, with web search", se.h2h), ex?.h2hWins({ models: modelsOf(s, (e) => e.mode === "search") }))),
-      W("you", withRefs(insightBar("Matchups, without web search", ins.h2h), ex?.h2hWins({ models: modelsOf(s, (e) => e.mode === "instinct") }))),
-      W("you", withRefs(insightBar("Picks, with web search", se.decided), ex?.picks(s.target.key, { models: modelsOf(s, (e) => e.mode === "search") }))),
-      W("you", withRefs(insightBar("Picks, without web search", ins.decided), ex?.picks(s.target.key, { models: modelsOf(s, (e) => e.mode === "instinct") }))),
+      W("you", insightBar("Matchups, with web search", se.h2h)),
+      W("you", insightBar("Matchups, without web search", ins.h2h)),
+      W("you", insightBar("Picks, with web search", se.decided)),
+      W("you", insightBar("Picks, without web search", ins.decided)),
     ]),
   };
 }
 
 /** The analysis map's watch threshold (WATCH_ENGINE_SHARE), at summary level. */
-const ENGINE_CONC_SHARE = 0.4;
-const ENGINE_CONC_MIN_ENGINES = 3;
+const ENGINE_CONC_SHARE = OF.engineConcShare;
+const ENGINE_CONC_MIN_ENGINES = OF.engineConcMinEngines;
 
 /**
  * One engine - or one vendor's assistants pooled - supplies >= 40% of a
@@ -1936,15 +1390,20 @@ function enginePickConcentration(s: Summary, inp: InsightInputs): Insight | null
   // A one-engine vendor is the engine row already; vendors need two or more
   // vendors on the panel to be a split at all.
   if (vendors.size >= 2) for (const u of vendors.values()) if (u.models.length >= 2) units.push(u);
-  type C = { key: string; name: string; isTarget: boolean; unit: Unit; picks: RateCell; base: number };
+  type C = { key: string; name: string; isTarget: boolean; unit: Unit; picks: RateCell; base: number; baseC: RateCell };
   const cands: C[] = [];
   for (const b of inp.enginePicks) {
-    if (b.total < MIN_BASE || !names.has(b.key)) continue;
+    if (b.total < MIN_BASE || !names.has(b.key) || !inp.F) continue;
     for (const u of units) {
-      const k = u.models.reduce((x, m) => x + (b.byModel[m] ?? 0), 0);
-      const picks = cell(k, b.total);
-      const base = u.answers / s.answers;
-      if (rate(picks) >= ENGINE_CONC_SHARE && picks.low > base) cands.push({ key: b.key, name: names.get(b.key)!, isTarget: b.key === s.target.key, unit: u, picks, base });
+      // Of the brand's picks, the share these assistants supply; of the questions, the share they answer - two facts.
+      const picks = inp.F.fact("slice_share", `ai/slice:eng:${u.models.join(",")}`, { ...inp.F.wtb, when: `pick:${b.key === s.target.key ? "you" : b.key}` });
+      const baseC = inp.F.fact("slice_share", `ai/slice:eng:${u.models.join(",")}`, inp.F.wtb);
+      const base = rate(baseC);
+      if (rate(picks) >= ENGINE_CONC_SHARE && picks.low > base) {
+        gAtLeast(picks, ENGINE_CONC_SHARE);
+        gLowAbove(picks, base);
+        cands.push({ key: b.key, name: names.get(b.key)!, isTarget: b.key === s.target.key, unit: u, picks, base, baseC });
+      }
     }
   }
   if (cands.length === 0) return null;
@@ -1957,13 +1416,13 @@ function enginePickConcentration(s: Summary, inp: InsightInputs): Insight | null
     key: "engine_pick_concentration",
     kind: "engine",
     title: `${best.unit.label} carries ${whose} picks`,
-    body: `${unit} supply ${pct(best.picks)} of ${whose} picks while answering ${pct(best.base)} of the questions - a read without ${best.unit.vendor ? "them" : "it"} would put ${best.isTarget ? yo() : best.name} far lower.`,
+    body: `${unit} supply ${pct(best.picks)} of ${whose} picks while answering ${pct(best.baseC)} of the questions - a read without ${best.unit.vendor ? "them" : "it"} would put ${best.isTarget ? yo() : best.name} far lower.`,
     foot: `${best.picks.k} of ${best.picks.n} open-choice picks of ${best.name} (95% range ${Math.round(best.picks.low * 100)}-${Math.round(best.picks.high * 100)}%) from ${unit}, which answer ${best.unit.answers} of ${s.answers} open-choice questions.`,
     look: { pill: "table", label: best.unit.vendor ? "Metrics - by vendor" : "Metrics - by engine" },
     effect: rate(best.picks) - best.base,
     viz: vizOf([
-      W(best.isTarget ? "you" : "rival", withRefs(insightBar(`Picks from ${best.unit.label}`, best.picks, undefined, true), inp.ex?.picks(best.key, { models: best.unit.models }))),
-      W("other", insightBar("Questions it answers", best.base)),
+      W(best.isTarget ? "you" : "rival", insightBar(`Picks from ${best.unit.label}`, best.picks, undefined, true)),
+      W("other", insightBar("Questions it answers", best.baseC)),
     ]),
     names: best.isTarget ? { variant: "you", vendor: best.unit.label } : { variant: "rival", vendor: best.unit.label, rival: best.name },
   };
@@ -1978,9 +1437,9 @@ function enginePickConcentration(s: Summary, inp: InsightInputs): Insight | null
  * On the fixture every tracker's largest gap is 24-55 points, so the guard
  * changes no firing there - it only stops a quiet tracker's lone near-zero
  * lean from becoming the finding. */
-const VENDOR_MIN_GAP = 0.1;
+const VENDOR_MIN_GAP = OF.vendorMinGap;
 /** At least this many companies with MIN_BASE answers on the measure. */
-const VENDOR_MIN_COMPANIES = 3;
+const VENDOR_MIN_COMPANIES = OF.vendorMinCompanies;
 
 /** The measures outside the open choice and the head-to-heads, one per
  * verdict, each read from its view's engine slices pooled by company. */
@@ -1994,135 +1453,65 @@ interface VendorMeasure {
   says: (company: string, a: string, b: string) => string;
   /** Short bar wording for the company's bar. */
   bar: string;
-  slices: { vendor: string; models: string[]; k: number; n: number }[];
-  /** Example answers for a company's numerator, where a pool filter is natural. */
-  refs?: (models: string[]) => AnswerRef[] | undefined;
-}
-
-/** Pools engine slices on their vendor. */
-function byVendor<T extends { key: string; vendor: string }>(slices: T[], cellOf: (s: T) => RateCell): VendorMeasure["slices"] {
-  const m = new Map<string, { vendor: string; models: string[]; k: number; n: number }>();
-  for (const s of slices) {
-    const c = cellOf(s);
-    const t = m.get(s.vendor) ?? { vendor: s.vendor, models: [], k: 0, n: 0 };
-    t.models.push(s.key);
-    t.k += c.k;
-    t.n += c.n;
-    m.set(s.vendor, t);
-  }
-  return [...m.values()];
+  /** The measure and the scope it is counted on; a company's number is the fact on its own engines, the others' the
+   * fact on every other company's engines. */
+  measure: string;
+  subject: string;
+  scope: Scope;
 }
 
 function vendorMeasures(inp: InsightInputs, brand: string): VendorMeasure[] {
   const out: VendorMeasure[] = [];
-  const k = inp.doubt.keepOrLeave;
   const lower = (x: string) => x.charAt(0).toLowerCase() + x.slice(1);
-  if (k) {
-    const row = lower(ROW_NAME.customers);
-    const base = { row, station: "customer_base", stationLabel: "Stations - Customers" };
-    out.push({
-      ...base,
-      id: "keep",
-      says: (c, a, b) => `Asked by ${yr()} customers whether to stay, ${c} says stay in ${a} of answers; the other AI assistants together, ${b}.`,
-      bar: "say stay",
-      slices: byVendor(k.byEngine, (s) => s.verdicts.keep),
-      refs: (models) => inp.ex?.doubt("keep", (r) => models.includes(r.model) && r.code.keep_or_leave === "keep"),
-    });
-    out.push({
-      ...base,
-      id: "leave",
-      says: (c, a, b) => `Asked by ${yr()} customers whether to stay, ${c} says leave in ${a} of answers; the other AI assistants together, ${b}.`,
-      bar: "say leave",
-      slices: byVendor(k.byEngine, (s) => s.verdicts.leave),
-      refs: (models) => inp.ex?.doubt("keep", (r) => models.includes(r.model) && r.code.keep_or_leave === "leave"),
-    });
+  if (inp.doubt.keepOrLeave) {
+    const base = { row: lower(ROW_NAME.customers), station: "customer_base", stationLabel: "Stations - Customers", subject: "ai", scope: { types: ["churn_triggers", "renewal"] } as Scope };
+    out.push({ ...base, id: "keep", measure: "stay", says: (c, a, b) => `Asked by ${yr()} customers whether to stay, ${c} says stay in ${a} of answers; the other AI assistants together, ${b}.`, bar: "say stay" });
+    out.push({ ...base, id: "leave", measure: "leave", says: (c, a, b) => `Asked by ${yr()} customers whether to stay, ${c} says leave in ${a} of answers; the other AI assistants together, ${b}.`, bar: "say leave" });
   }
-  const o = inp.doubt.objections;
-  if (o) {
-    const row = lower(ROW_NAME.buyers);
-    const base = { row, station: "doubts", stationLabel: "Stations - Doubts" };
-    out.push({
-      ...base,
-      id: "proceed",
-      says: (c, a, b) => `When a buyer voices a worry about ${brand}, ${c} says go ahead in ${a} of answers; the other AI assistants together, ${b}.`,
-      bar: "say go ahead",
-      slices: byVendor(o.byEngine, (s) => s.verdicts.proceed),
-      refs: (models) => inp.ex?.doubt("objections", (r) => models.includes(r.model) && r.code.proceed_or_avoid === "proceed"),
-    });
-    out.push({
-      ...base,
-      id: "avoid",
-      says: (c, a, b) => `When a buyer voices a worry about ${brand}, ${c} says steer clear in ${a} of answers; the other AI assistants together, ${b}.`,
-      bar: "say steer clear",
-      slices: byVendor(o.byEngine, (s) => s.verdicts.avoid),
-      refs: (models) => inp.ex?.doubt("objections", (r) => models.includes(r.model) && r.code.proceed_or_avoid === "avoid"),
-    });
+  if (inp.doubt.objections) {
+    const base = { row: lower(ROW_NAME.buyers), station: "doubts", stationLabel: "Stations - Doubts", subject: "ai", scope: { types: ["objections"] } as Scope };
+    out.push({ ...base, id: "proceed", measure: "go_ahead", says: (c, a, b) => `When a buyer voices a worry about ${brand}, ${c} says go ahead in ${a} of answers; the other AI assistants together, ${b}.`, bar: "say go ahead" });
+    out.push({ ...base, id: "avoid", measure: "steer_clear", says: (c, a, b) => `When a buyer voices a worry about ${brand}, ${c} says steer clear in ${a} of answers; the other AI assistants together, ${b}.`, bar: "say steer clear" });
   }
-  const v = inp.value;
-  if (v) {
-    const row = lower(ROW_NAME.value);
-    const base = { row, station: "value", stationLabel: "Stations - Value" };
-    out.push({
-      ...base,
-      id: "worth_yes",
-      says: (c, a, b) => `Asked whether ${brand} is worth paying more for, ${c} says yes in ${a} of answers; the other AI assistants together, ${b}.`,
-      bar: "say worth it",
-      slices: byVendor(v.byEngine, (s) => s.worth.yes),
-    });
-    out.push({
-      ...base,
-      id: "worth_no",
-      says: (c, a, b) => `Asked whether ${brand} is worth paying more for, ${c} says no in ${a} of answers; the other AI assistants together, ${b}.`,
-      bar: "say not worth it",
-      slices: byVendor(v.byEngine, (s) => s.worth.no),
-    });
+  if (inp.value) {
+    const base = { row: lower(ROW_NAME.value), station: "value", stationLabel: "Stations - Value", subject: "ai", scope: { types: ["pricing"] } as Scope };
+    out.push({ ...base, id: "worth_yes", measure: "worth_yes", says: (c, a, b) => `Asked whether ${brand} is worth paying more for, ${c} says yes in ${a} of answers; the other AI assistants together, ${b}.`, bar: "say worth it" });
+    out.push({ ...base, id: "worth_no", measure: "worth_no", says: (c, a, b) => `Asked whether ${brand} is worth paying more for, ${c} says no in ${a} of answers; the other AI assistants together, ${b}.`, bar: "say not worth it" });
   }
-  const off = inp.alternatives.offensive;
-  if (off)
-    out.push({
-      id: "captured",
-      row: lower(ROW_NAME.leavers),
-      station: "comparison",
-      stationLabel: "Stations - Comparison",
-      says: (c, a, b) => `When a rival's customer asks what to switch to, ${c} picks ${yo()} in ${a} of answers; the other AI assistants together, ${b}.`,
-      bar: "pick you",
-      slices: byVendor(off.byEngine, (s) => s.captured),
-    });
-  const def = inp.alternatives.defensive;
-  if (def)
-    out.push({
-      id: "hold_stay",
-      row: lower(ROW_NAME.hold),
-      station: "customer_base",
-      stationLabel: "Stations - Customers",
-      says: (c, a, b) => `When ${yr()} own customers ask what else to consider, ${c} tells them to stay in ${a} of answers; the other AI assistants together, ${b}.`,
-      bar: "say stay",
-      slices: byVendor(def.byEngine, (s) => s.verdicts.keep),
-    });
+  if (inp.alternatives.offensive)
+    out.push({ id: "captured", row: lower(ROW_NAME.leavers), station: "comparison", stationLabel: "Stations - Comparison", measure: "picked", subject: "you", scope: { types: ["switching"] }, says: (c, a, b) => `When a rival's customer asks what to switch to, ${c} picks ${yo()} in ${a} of answers; the other AI assistants together, ${b}.`, bar: "pick you" });
+  if (inp.alternatives.defensive)
+    out.push({ id: "hold_stay", row: lower(ROW_NAME.hold), station: "customer_base", stationLabel: "Stations - Customers", measure: "stay", subject: "ai", scope: { types: ["looking_around"], situation: null }, says: (c, a, b) => `When ${yr()} own customers ask what else to consider, ${c} tells them to stay in ${a} of answers; the other AI assistants together, ${b}.`, bar: "say stay" });
   return out;
 }
 
 /** Every (measure, company) pair whose rate sits apart from the other
  * companies pooled - exported for the calibration dump; the detector serves
- * the one whose ranges sit furthest apart, at or above VENDOR_MIN_GAP. */
+ * the one whose ranges sit furthest apart, at or above VENDOR_MIN_GAP. Each
+ * side is its own fact (the company's engines; every other company's engines). */
 export function vendorOutlierCandidates(inp: InsightInputs, brand: string) {
   const out: { measure: VendorMeasure; vendor: string; models: string[]; own: RateCell; rest: RateCell; gap: number; clear: number }[] = [];
+  if (!inp.F) return out;
+  const byVendor = new Map<string, string[]>();
+  for (const m of inp.F.engines) {
+    const v = facetsOf(m).vendor;
+    byVendor.set(v, [...(byVendor.get(v) ?? []), m]);
+  }
   for (const m of vendorMeasures(inp, brand)) {
-    if (m.slices.filter((x) => x.n >= MIN_BASE).length < VENDOR_MIN_COMPANIES) continue;
-    for (const s of m.slices) {
-      const others = m.slices.filter((x) => x !== s);
-      const own = cell(s.k, s.n);
-      const rest = cell(
-        others.reduce((x, o) => x + o.k, 0),
-        others.reduce((x, o) => x + o.n, 0)
-      );
+    const per = [...byVendor.entries()].map(([vendor, models]) => ({ vendor, models, own: inp.F!.fact(m.measure, m.subject, { ...m.scope, engines: models }) }));
+    if (per.filter((x) => x.own.n >= MIN_BASE).length < VENDOR_MIN_COMPANIES) continue;
+    for (const x of per) {
+      const others = [...byVendor.entries()].filter(([v]) => v !== x.vendor).flatMap(([, ms]) => ms);
+      if (!others.length) continue;
+      const own = x.own;
+      const rest = inp.F.fact(m.measure, m.subject, { ...m.scope, engines: others });
       if (own.n < MIN_BASE || rest.n < MIN_BASE) continue;
-      if (!apart(own, rest) && !apart(rest, own)) continue;
+      if (!(own.low > rest.high) && !(rest.low > own.high)) continue;
       const gap = rate(own) - rate(rest);
       // How far the two 95% ranges sit from each other - the ranking, so a
       // thin pool with a wide range never outranks a well-measured company.
       const clear = gap > 0 ? own.low - rest.high : rest.low - own.high;
-      out.push({ measure: m, vendor: s.vendor, models: s.models, own, rest, gap, clear });
+      out.push({ measure: m, vendor: x.vendor, models: x.models, own, rest, gap, clear });
     }
   }
   return out.sort((a, b) => b.clear - a.clear || a.measure.id.localeCompare(b.measure.id) || a.vendor.localeCompare(b.vendor));
@@ -2140,6 +1529,11 @@ export function vendorOutlierCandidates(inp: InsightInputs, brand: string) {
 function vendorOutlier(inp: InsightInputs, brand: string): Insight | null {
   const best = vendorOutlierCandidates(inp, brand).find((c) => Math.abs(c.gap) >= VENDOR_MIN_GAP);
   if (!best) return null;
+  enough(best.own);
+  enough(best.rest);
+  if (best.gap > 0) apart(best.own, best.rest);
+  else apart(best.rest, best.own);
+  gGap(best.own, best.rest, VENDOR_MIN_GAP);
   const m = best.measure;
   const engines = best.models.length;
   return {
@@ -2151,7 +1545,7 @@ function vendorOutlier(inp: InsightInputs, brand: string): Insight | null {
     look: { pill: "stations", station: m.station, label: m.stationLabel },
     effect: Math.abs(best.gap),
     viz: vizOf([
-      W("you", withRefs(insightBar(`${best.vendor} - ${m.bar}`, best.own, undefined, true), m.refs?.(best.models))),
+      W("you", insightBar(`${best.vendor} - ${m.bar}`, best.own, undefined, true)),
       W("other", insightBar(`The others - ${m.bar}`, best.rest)),
     ]),
     names: { vendor: best.vendor, question: m.row },
@@ -2161,7 +1555,7 @@ function vendorOutlier(inp: InsightInputs, brand: string): Insight | null {
 /* ---------------------- bs8: neutralized differentiator --------------------- */
 
 /** An argument carried by this share of your head-to-head wins is one you win on. */
-const ND_WIN_SHARE = 0.4;
+const ND_WIN_SHARE = OF.ndWinShare;
 
 /**
  * An argument in >= 40% of the target's prompted head-to-head wins (all
@@ -2175,10 +1569,10 @@ const ND_WIN_SHARE = 0.4;
  */
 function neutralizedDifferentiator(inp: InsightInputs): Insight | null {
   const a = inp.h2hArgs;
-  if (a.wins < MIN_BASE || a.losses < MIN_BASE) return null;
+  if (!a.winsCell || !a.lossesCell || !enough(a.winsCell, MIN_BASE) || a.wins < MIN_BASE || a.losses < MIN_BASE) return null;
   const cands = a.codes
-    .filter((c) => c.wins >= MIN_BASE && c.losses >= MIN_BASE)
-    .map((c) => ({ ...c, w: cell(c.wins, a.wins), l: cell(c.losses, a.losses) }))
+    .filter((c) => c.wins >= MIN_BASE && c.losses >= MIN_BASE && c.w && c.l)
+    .map((c) => ({ ...c, w: c.w!, l: c.l! }))
     .filter((c) => rate(c.w) >= ND_WIN_SHARE && !apart(c.w, c.l) && rate(c.l) > rate(c.w))
     .map((c) => ({ ...c, above: apart(c.l, c.w) }))
     .sort((x, y) => Number(y.above) - Number(x.above) || rate(y.l) - rate(x.l) || x.code.localeCompare(y.code));
@@ -2207,8 +1601,8 @@ function neutralizedDifferentiator(inp: InsightInputs): Insight | null {
     look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
     effect: rate(best.l) - rate(best.w),
     viz: vizOf([
-      W("you", withRefs(insightBar("In matchups you win", best.w), inp.ex?.h2hArg(best.code, "wins"))),
-      W("rival", withRefs(insightBar("In matchups you lose", best.l, undefined, true), inp.ex?.h2hArg(best.code, "losses"))),
+      W("you", insightBar("In matchups you win", best.w)),
+      W("rival", insightBar("In matchups you lose", best.l, undefined, true)),
     ]),
     names: { topic: best.code, ...(rival ? { rival } : {}) },
   };
@@ -2221,8 +1615,7 @@ function neutralizedDifferentiator(inp: InsightInputs): Insight | null {
  * Yes/no question types (Value, worries) are left out on purpose: there an
  * argument's share by verdict follows which worry or product line the
  * answers are about, not who the argument favours. */
-const ARG_CONTESTS = ["headline", "head_to_head_entity", "offensive_capture"] as const;
-type ArgContest = (typeof ARG_CONTESTS)[number];
+type ArgContest = "headline" | "head_to_head_entity" | "offensive_capture";
 const ARG_CONTEST: Record<ArgContest, { when: string; row: string }> = {
   headline: { when: "when buyers ask what to buy", row: ROW_NAME.open },
   head_to_head_entity: { when: "in direct matchups", row: ROW_NAME.h2h },
@@ -2254,8 +1647,6 @@ function argumentFlip(inp: InsightInputs): Insight | null {
   const up = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
   const H = ARG_CONTEST[help.type];
   const U = ARG_CONTEST[hurt.type];
-  const refs = (t: ArgContest, side: "you" | "other") =>
-    t === "headline" ? inp.ex?.argued(code, side === "you" ? "you" : "others") : t === "head_to_head_entity" ? inp.ex?.h2hArg(code, side === "you" ? "wins" : "losses") : undefined;
   return {
     key: "argument_flip",
     kind: "argument",
@@ -2265,10 +1656,10 @@ function argumentFlip(inp: InsightInputs): Insight | null {
     look: { pill: "stations", station: hurt.type === "headline" ? "consideration" : "comparison", label: `Stations - ${U.row}` },
     effect: best.effect,
     viz: vizOf([
-      W("you", withRefs(insightBar(`${H.row}: you picked`, help.you), refs(help.type, "you"))),
-      W("rival", withRefs(insightBar(`${H.row}: rival picked`, help.other), refs(help.type, "other"))),
-      W("you", withRefs(insightBar(`${U.row}: you picked`, hurt.you), refs(hurt.type, "you"))),
-      W("rival", withRefs(insightBar(`${U.row}: rival picked`, hurt.other, undefined, true), refs(hurt.type, "other"))),
+      W("you", insightBar(`${H.row}: you picked`, help.you)),
+      W("rival", insightBar(`${H.row}: rival picked`, help.other)),
+      W("you", insightBar(`${U.row}: you picked`, hurt.you)),
+      W("rival", insightBar(`${U.row}: rival picked`, hurt.other, undefined, true)),
     ]),
     names: { topic: code, question: U.when },
   };
@@ -2282,12 +1673,13 @@ function argumentFlip(inp: InsightInputs): Insight | null {
  * largest share of decided; both need MIN_BASE recommendations and the two
  * ranges must not overlap, either direction. Effect = the gap.
  */
-function conversionVsRival(s: Summary, ex?: ExampleIndex): Insight | null {
+function conversionVsRival(s: Summary): Insight | null {
   const rival = s.brands.find((b) => b.role !== "target" && b.chosen.k > 0);
   if (!rival) return null;
-  const you = cell(s.target.chosen.k, s.target.recommended.k);
-  const them = cell(rival.chosen.k, rival.recommended.k);
-  if (you.n < MIN_BASE || them.n < MIN_BASE) return null;
+  // Recommendations that end as the pick: each brand's own fact (a pick counts as recommended, ruling 6).
+  const you = s.target.converts;
+  const them = rival.converts;
+  if (!you || !them || !enough(you) || !enough(them)) return null;
   const rivalAhead = rate(them) > rate(you);
   if (!(rivalAhead ? apart(them, you) : apart(you, them))) return null;
   return {
@@ -2300,7 +1692,7 @@ function conversionVsRival(s: Summary, ex?: ExampleIndex): Insight | null {
     foot: `${rival.name}: picked in ${counts(them)} recommending answers. You: ${counts(you)}. ${rival.name} has the largest share of decided open-choice picks among your rivals.`,
     look: { pill: "rivals", label: "Rivals" },
     effect: Math.abs(rate(them) - rate(you)),
-    viz: vizOf([W("you", withRefs(insightBar(s.brand, you, undefined, true), ex?.picks(s.target.key))), W("rival", withRefs(insightBar(rival.name, them), ex?.picks(rival.key)))]),
+    viz: vizOf([W("you", insightBar(s.brand, you, undefined, true)), W("rival", insightBar(rival.name, them))]),
     names: { variant: rivalAhead ? "behind" : "ahead", rival: rival.name },
   };
 }
@@ -2313,7 +1705,7 @@ function conversionVsRival(s: Summary, ex?: ExampleIndex): Insight | null {
  * dossier's amber callout). The largest share of picks wins when several
  * qualify. Effect = its share of picks.
  */
-function unaskedRival(s: Summary, inp: InsightInputs, ex?: ExampleIndex): Insight | null {
+function unaskedRival(s: Summary, inp: InsightInputs): Insight | null {
   if (!inp.asked) return null;
   const asked = new Set(inp.asked);
   const rival = s.brands
@@ -2332,7 +1724,7 @@ function unaskedRival(s: Summary, inp: InsightInputs, ex?: ExampleIndex): Insigh
     foot: `${rival.name}: ${counts(rival.shareOfDecided)} of the picks. You: ${counts(s.target.shareOfDecided)}. No direct matchup against ${rival.name} was asked this wave.`,
     look: { pill: "rivals", label: "Rivals" },
     effect: rate(rival.shareOfDecided),
-    viz: vizOf([W("rival", withRefs(insightBar(rival.name, rival.shareOfDecided, undefined, true), ex?.picks(rival.key))), W("you", withRefs(insightBar(s.brand, s.target.shareOfDecided), ex?.picks(s.target.key)))]),
+    viz: vizOf([W("rival", insightBar(rival.name, rival.shareOfDecided, undefined, true)), W("you", insightBar(s.brand, s.target.shareOfDecided))]),
     names: { rival: rival.name },
     matchup: { key: rival.key, name: rival.name },
   };
@@ -2341,24 +1733,24 @@ function unaskedRival(s: Summary, inp: InsightInputs, ex?: ExampleIndex): Insigh
 /* ------------------------------- bs8: leaks -------------------------------- */
 
 /** The analysis map's leak badge threshold (LEAK_SHARE), at summary level. */
-const LEAK_PICKS_SHARE = 0.1;
+const LEAK_PICKS_SHARE = OF.leakPicksShare;
 /** Problem questions routed outside the category in at least this share. */
-const LEAK_PROBLEM_SHARE = 0.5;
+const LEAK_PROBLEM_SHARE = OF.leakProblemShare;
 
 const listNames = (names: string[]) =>
   names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 
 /** Firm open-choice picks that leave the category (B5). Effect = the share. */
 function leakPicks(inp: InsightInputs): Insight | null {
+  // Ruling 8: of every pick, the share outside the category (a pick outside of analysis is its own bucket).
   const l = inp.leak;
-  if (l.firm < MIN_BASE) return null;
-  const outside = cell(l.firm - l.inCategory, l.firm);
-  if (rate(outside) < LEAK_PICKS_SHARE) return null;
+  const outside = l.outsideCell;
+  if (!outside || !enough(outside) || !gAtLeast(outside, LEAK_PICKS_SHARE)) return null;
   const top = l.names.slice(0, 3);
   const room = [...l.rooms]
     .filter((r) => r.firm >= MIN_BASE && r.outside > 0)
     .sort((a, b) => b.outside / b.firm - a.outside / a.firm || a.room.localeCompare(b.room))[0];
-  const roomCell = room ? cell(room.outside, room.firm) : null;
+  const roomCell = room ? l.roomCells?.[room.room] ?? null : null;
   const roomText = room && roomCell && rate(roomCell) > rate(outside) ? `; for ${buyer(room.room)} it is ${pct(roomCell)}` : "";
   return {
     key: "leak_picks",
@@ -2369,10 +1761,10 @@ function leakPicks(inp: InsightInputs): Insight | null {
     look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
     effect: rate(outside),
     viz: vizOf([
-      W("other", withRefs(insightBar("Outside the category", outside, undefined, true), inp.ex?.outside())),
+      W("other", insightBar("Outside the category", outside, undefined, true)),
       roomText && roomCell
-        ? W("other", withRefs(insightBar(lbl(room!.room), roomCell), inp.ex?.outside({ room: room!.room })))
-        : W("other", withRefs(insightBar("Inside the category", 1 - rate(outside)), inp.ex?.picks(null))),
+        ? W("other", insightBar(lbl(room!.room), roomCell))
+        : W("other", insightBar("Inside the category", inp.F ? inp.F.fact("slice_share", "ai/slice:!pick:outside_category", { ...inp.F.wtb, when: "!pick:none" }) : 1 - rate(outside))),
     ]),
     names: roomText && room ? { buyer: room.room } : {},
   };
@@ -2387,15 +1779,12 @@ function leakPicks(inp: InsightInputs): Insight | null {
 function leakProblem(inp: InsightInputs): Insight | null {
   const p = inp.problem;
   if (!p) return null;
-  const top = p.rooms.filter((r) => r.out.n >= MIN_BASE).sort((a, b) => rate(b.out) - rate(a.out) || a.room.localeCompare(b.room))[0];
-  if (!top || rate(top.out) < LEAK_PROBLEM_SHARE) return null;
-  const others = p.rooms.filter((r) => r.room !== top.room);
-  const rest = cell(
-    others.reduce((x, r) => x + r.out.k, 0),
-    others.reduce((x, r) => x + r.out.n, 0)
-  );
+  const top = p.rooms.filter((r) => enough(r.out)).sort((a, b) => rate(b.out) - rate(a.out) || a.room.localeCompare(b.room))[0];
+  if (!top || !gAtLeast(top.out, LEAK_PROBLEM_SHARE) || !inp.F) return null;
+  // The other buying situations (questions asked of a buyer), pooled as one fact.
+  const rest = inp.F.fact("routed_adjacent", "ai", { types: ["problem_recognition"], when: `!${sitSlice(top.room)}&!sit:~none` });
   const oneRoom = rest.n >= MIN_BASE && apart(top.out, rest);
-  if (!oneRoom && rate(p.all) < LEAK_PROBLEM_SHARE) return null;
+  if (!oneRoom && !gAtLeast(p.all, LEAK_PROBLEM_SHARE)) return null;
   return {
     key: "leak_problem",
     kind: "leak",
@@ -2418,12 +1807,12 @@ function leakProblem(inp: InsightInputs): Insight | null {
     effect: (oneRoom ? rate(top.out) : rate(p.all)) - LEAK_PROBLEM_SHARE,
     viz: oneRoom
       ? vizOf([
-          W("other", withRefs(insightBar(lbl(top.room), top.out, undefined, true), inp.ex?.routing({ room: top.room }))),
-          W("other", withRefs(insightBar("Other buying situations", rest), inp.ex?.routing({ notRoom: top.room }))),
+          W("other", insightBar(lbl(top.room), top.out, undefined, true)),
+          W("other", insightBar("Other buying situations", rest)),
         ])
       : vizOf([
-          W("other", withRefs(insightBar("Every buying situation", p.all, undefined, true), inp.ex?.routing())),
-          W("other", withRefs(insightBar(lbl(top.room), top.out), inp.ex?.routing({ room: top.room }))),
+          W("other", insightBar("Every buying situation", p.all, undefined, true)),
+          W("other", insightBar(lbl(top.room), top.out)),
         ]),
     names: oneRoom ? { buyer: top.room } : {},
   };
@@ -2435,15 +1824,12 @@ function leakProblem(inp: InsightInputs): Insight | null {
 function worstWorry(inp: InsightInputs): Insight | null {
   const k = inp.doubt.keepOrLeave;
   if (!k || k.rows.length < 2) return null;
-  const ok = k.rows.filter((r) => r.answers >= MIN_BASE);
-  if (ok.length === 0) return null;
+  const ok = k.rows.filter((r) => enough(r.verdicts.leave));
+  if (ok.length === 0 || !inp.F) return null;
   const top = [...ok].sort((a, b) => rate(b.verdicts.leave) - rate(a.verdicts.leave) || a.concern.localeCompare(b.concern))[0];
-  const others = k.rows.filter((r) => r.key !== top.key);
-  const rest = cell(
-    others.reduce((x, r) => x + r.verdicts.leave.k, 0),
-    others.reduce((x, r) => x + r.answers, 0)
-  );
-  if (rest.n < MIN_BASE || !apart(top.verdicts.leave, rest)) return null;
+  // Every other customers' worry (another worry, or the same worry at the other stage), pooled as one fact.
+  const rest = inp.F.fact("leave", "ai", { types: ["churn_triggers", "renewal"], when: `!${worrySlice(top.concern)}|!stage:${top.stage}` });
+  if (!enough(rest) || !apart(top.verdicts.leave, rest)) return null;
   const exit = top.topExits[0];
   const concern = top.concern || "this worry";
   return {
@@ -2461,15 +1847,15 @@ function worstWorry(inp: InsightInputs): Insight | null {
     look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
     effect: rate(top.verdicts.leave) - rate(rest),
     viz: vizOf([
-      W("you", withRefs(insightBar(lbl(concern), top.verdicts.leave, undefined, true), inp.ex?.doubt("keep", (r) => worryKey(r) === top.key && r.code.keep_or_leave === "leave"))),
-      W("other", withRefs(insightBar("Their other worries", rest), inp.ex?.doubt("keep", (r) => worryKey(r) !== top.key && r.code.keep_or_leave === "leave"))),
+      W("you", insightBar(lbl(concern), top.verdicts.leave, undefined, true)),
+      W("other", insightBar("Their other worries", rest)),
     ]),
     names: { worry: concern },
   };
 }
 
 /** Leave verdicts naming no destination at all. */
-const NO_EXIT_SHARE = 0.5;
+const NO_EXIT_SHARE = OF.noExitShare;
 
 /** Of the customers' leave verdicts, the share naming no destination (the
  * doubt view's offersExitBy.leave, inverted). Effect = the share above half. */
@@ -2477,9 +1863,10 @@ function leaveNoExit(inp: InsightInputs, brand: string): Insight | null {
   const k = inp.doubt.keepOrLeave;
   if (!k) return null;
   const withExit = k.offersExitBy.leave;
-  if (withExit.n < MIN_BASE) return null;
-  const none = cell(withExit.n - withExit.k, withExit.n);
-  if (rate(none) < NO_EXIT_SHARE) return null;
+  if (!enough(withExit) || !inp.F) return null;
+  // Of the leave answers, the share naming nowhere to go - one fact.
+  const none = inp.F.fact("slice_share", "ai/slice:!sent:any", { types: ["churn_triggers", "renewal"], when: "v:keep_or_leave:leave" });
+  if (!gAtLeast(none, NO_EXIT_SHARE)) return null;
   return {
     key: "leave_no_exit",
     kind: "doubt",
@@ -2498,12 +1885,22 @@ function leaveNoExit(inp: InsightInputs, brand: string): Insight | null {
  * (standing, prompted vs open, concentration, doubts, value, settled), each
  * only when its inputs clear the floors. Percentages in `text`, counts in `foot`.
  */
-export function composeVerdict(s: Summary, inp: InsightInputs): VerdictFact[] {
+export function composeVerdict(s: Summary, inp: InsightInputs, decisions?: Decision[]): VerdictFact[] {
+  openGates();
+  try {
+    return composeVerdictRun(s, inp);
+  } finally {
+    const gates = closeGates();
+    decisions?.push({ key: "verdict", fired: true, gates });
+  }
+}
+
+function composeVerdictRun(s: Summary, inp: InsightInputs): VerdictFact[] {
   const out: VerdictFact[] = [];
-  const decidedOk = s.firmPickInCategory.k >= MIN_BASE;
+  const decidedOk = gK(s.firmPickInCategory, MIN_BASE);
 
   // 1. Standing.
-  if (s.answers >= MIN_BASE) {
+  if (enough(s.target.mentioned)) {
     const rival = s.brands.find((b) => b.role !== "target" && b.chosen.k > 0);
     let text: string;
     let foot = `Named ${counts(s.target.mentioned)}; picked ${counts(s.target.chosen)}`;
@@ -2516,7 +1913,7 @@ export function composeVerdict(s: Summary, inp: InsightInputs): VerdictFact[] {
         foot += `; ${rival.name} ${rival.chosen.k}`;
       }
     } else {
-      text = `${s.brand} is named in ${pct(s.target.mentioned)} of answers when buyers ask what to buy and is the pick in ${pctFine(rate(s.target.chosen))} of all answers.`;
+      text = `${s.brand} is named in ${pct(s.target.mentioned)} of answers when buyers ask what to buy and is the pick in ${pfine(s.target.chosen)} of all answers.`;
     }
     out.push({ key: "standing", text, foot: `${foot}.`, look: { pill: "stations", station: "consideration", label: "Stations - Consideration" } });
   }
@@ -2528,9 +1925,9 @@ export function composeVerdict(s: Summary, inp: InsightInputs): VerdictFact[] {
     const gap = rate(rec.pooled) - rate(s.target.shareOfDecided);
     const openText = `${pct(s.target.shareOfDecided)} of the picks when buyers ask what to buy`;
     const text =
-      gap >= 0.1
+      gap >= OF.verdictPromptedGap
         ? `Asked to compare it with a rival directly, the AI picks it in ${pct(rec.pooled)} of matchups${hard} - but it takes only ${openText}.`
-        : gap <= -0.1
+        : gap <= -OF.verdictPromptedGap
           ? `It takes ${openText}, but asked to compare it with a rival directly, the AI picks it in only ${pct(rec.pooled)} of matchups${hard}.`
           : `Asked to compare it with a rival directly, the AI picks it in ${pct(rec.pooled)} of matchups${hard}, in line with its ${openText}.`;
     out.push({
@@ -2546,7 +1943,7 @@ export function composeVerdict(s: Summary, inp: InsightInputs): VerdictFact[] {
   if (room) {
     out.push({
       key: "concentration",
-      text: `${pct(room.share)} of its picks come from one buying situation, ${room.top.room}.`,
+      text: `${pct(room.shareC)} of its picks come from one buying situation, ${room.top.room}.`,
       foot: `${room.top.picks} of ${room.total} open-choice picks; ${room.rooms} rooms.`,
       look: { pill: "buyers", label: "Buyers" },
     });
@@ -2555,15 +1952,15 @@ export function composeVerdict(s: Summary, inp: InsightInputs): VerdictFact[] {
     if (q)
       out.push({
         key: "concentration",
-        text: `${pct(q.share)} of its picks come from one question: "${quoteQuestion(q.top.text)}"`,
+        text: `${pct(q.shareC)} of its picks come from one question: "${quoteQuestion(q.top.text)}"`,
         foot: `${q.k} of ${q.total} open-choice picks; ${q.n} questions.`,
         look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
       });
   }
 
   // 4. Doubts.
-  const b = s.buyersDoubt && s.buyersDoubt.answers >= MIN_BASE && s.buyersDoubt.agree.n >= MIN_BASE ? s.buyersDoubt : null;
-  const c = s.customersDoubt && s.customersDoubt.answers >= MIN_BASE ? s.customersDoubt : null;
+  const b = s.buyersDoubt && enough(s.buyersDoubt.proceed) && enough(s.buyersDoubt.agree) ? s.buyersDoubt : null;
+  const c = s.customersDoubt && enough(s.customersDoubt.keep) ? s.customersDoubt : null;
   if (b || c) {
     const text = b
       ? `The AI agrees with buyers' worries in ${pct(b.agree)} of the answers that take a side, and still tells buyers to go ahead in ${pct(b.proceed)}${c ? `; customers with a worry are told to stay in ${pct(c.keep)}` : ""}.`
@@ -2576,30 +1973,34 @@ export function composeVerdict(s: Summary, inp: InsightInputs): VerdictFact[] {
 
   // 5. Value.
   const v = inp.value;
-  if (v && v.answers >= MIN_BASE) {
+  if (v && enough(v.worth.yes)) {
     const subject = v.lines.length === 1 ? v.lines[0].label : `${s.brand}'s lines`;
     const verb = v.lines.length === 1 ? "is" : "are";
     let tail = "";
-    if (v.ownRung.n >= MIN_BASE) {
+    // Ruling 3: each price answer in one bucket, shares of ALL the price answers.
+    if (enough(v.ownRung)) {
       const own = rate(v.ownRung);
       const riv = rate(v.recommendsInstead);
       const topRival = v.instead.find((i) => !i.own);
-      if (own >= 0.5 && own >= riv) tail = "; most of the doubts point to its own cheaper option";
-      else if (riv >= 0.5 && riv > own) tail = `; most of the doubts point to a rival${topRival ? `, led by ${topRival.name}` : ""}`;
-      else if (own >= 0.3 || riv >= 0.3) tail = `; ${pct(own)} of the doubts point to its own cheaper option and ${pct(riv)} to a rival`;
+      if (own >= OF.valueMost && own >= riv) tail = "; most answers point the buyer to only its own cheaper option";
+      else if (riv >= OF.valueMost && riv > own) tail = `; most answers point the buyer to a rival instead${topRival ? `, led by ${topRival.name}` : ""}`;
+      else if (own >= OF.valueSide || riv >= OF.valueSide)
+        tail = inp.F?.rf.set.ladder
+          ? `; the AI points the buyer to only its own cheaper option in ${pct(v.ownRung)} of answers and to a rival in ${pct(v.recommendsInstead)}`
+          : `; the AI points the buyer to a rival instead in ${pct(v.recommendsInstead)} of answers`;
     }
     out.push({
       key: "value",
       text: `${subject} ${verb} judged worth it in ${pct(v.worth.yes)} of answers${tail}.`,
-      foot: `Worth it ${counts(v.worth.yes)}.${v.ownRung.n > 0 ? ` Of the no and it-depends answers: own option ${v.ownRung.k}, a rival ${v.recommendsInstead.k}, of ${v.ownRung.n}.` : ""}`,
+      foot: `Worth it ${counts(v.worth.yes)}.${v.ownRung.n > 0 ? ` Of every price answer: only its own option ${v.ownRung.k}, a rival ${v.recommendsInstead.k}, of ${v.ownRung.n}.` : ""}`,
       look: { pill: "stations", station: "value", label: "Stations - Value" },
     });
   }
 
   // 6. Settled customers.
-  const adv = inp.settled.advocacy && inp.settled.advocacy.answers >= MIN_BASE ? inp.settled.advocacy : null;
-  const bc = inp.settled.businessCase && inp.settled.businessCase.answers >= MIN_BASE ? inp.settled.businessCase : null;
-  const obj = inp.doubt.objections && inp.doubt.objections.premise.confirms.n >= MIN_BASE ? inp.doubt.objections : null;
+  const adv = inp.settled.advocacy && enough(inp.settled.advocacy.verdicts.strengthens) ? inp.settled.advocacy : null;
+  const bc = inp.settled.businessCase && enough(inp.settled.businessCase.caseStrength.strong) ? inp.settled.businessCase : null;
+  const obj = inp.doubt.objections && enough(inp.doubt.objections.premise.confirms) ? inp.doubt.objections : null;
   if (adv) {
     out.push({
       key: "settled",
@@ -2617,7 +2018,11 @@ export function composeVerdict(s: Summary, inp: InsightInputs): VerdictFact[] {
       look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
     });
   }
-  return out;
+  // Statements: the plain text, and where each number sits with its fact id (never drawn).
+  return out.map((v) => {
+    const t = finish(extremeWords(v.text));
+    return { ...v, text: t.text, foot: finish(v.foot).text, ...(t.nums.length ? { facts: { text: t.nums } } : {}) };
+  });
 }
 
 /** The served list: each firing kind's best insight gets a slot before any
@@ -2642,52 +2047,104 @@ export function detectInsights(s: Summary, inp: InsightInputs): Insight[] {
   return all.filter((i) => taken.has(i));
 }
 
-/** Every detector that fires, ranked by effect, uncapped (harnesses read the tail). */
-export function rankedInsights(s: Summary, inp: InsightInputs, style?: InsightStyle): Insight[] {
+/** One detector's decision, for a proof: whether it fired, and every gate it read (statements.ts). */
+export interface Decision {
+  key: string;
+  fired: boolean;
+  gates: Gate[];
+}
+
+/** Every detector that fires, ranked by effect, uncapped (harnesses read the tail). `decisions` (proofs) receives
+ * every detector's gates, fired or not. */
+export function rankedInsights(s: Summary, inp: InsightInputs, style?: InsightStyle, decisions?: Decision[]): Insight[] {
   const prev = STYLE;
   STYLE = style ?? null;
   try {
-    return rankedRun(s, inp);
+    return rankedRun(s, inp, decisions);
   } finally {
     STYLE = prev;
   }
 }
-function rankedRun(s: Summary, inp: InsightInputs): Insight[] {
-  const found = [
-    engineSpread(s, inp.ex),
-    modeGap(s, inp.ex),
-    vendorGap(s, inp.ex),
-    roomWin(inp, s.target.key),
-    roomValue(inp, s.brand),
-    rivalOpen(s, inp.ex),
-    rivalHeadToHead(s, inp.ex),
-    argument(s, inp.ex),
-    doubtRollup(s, inp.ex),
-    doubtWorry(inp),
-    funnelDrop(s, inp.ex),
-    promptedVsOpen(s, inp.ex),
-    pickConcentrationRoom(s, inp),
-    pickConcentrationQuestion(s, inp),
-    agreedYetStay(inp),
-    taughtVsWinning(s, inp),
-    valueInHouse(inp, s.brand),
-    advocacyVsObjection(inp),
-    leaverCapture(inp),
-    ownDefense(inp),
-    awayCondition(s, inp),
-    assignedException(s, inp),
-    engineDecisiveness(s, inp.ex),
-    engineHeadToHeadFlip(s, inp.ex),
-    enginePickConcentration(s, inp),
-    neutralizedDifferentiator(inp),
-    argumentFlip(inp),
-    conversionVsRival(s, inp.ex),
-    unaskedRival(s, inp, inp.ex),
-    leakPicks(inp),
-    leakProblem(inp),
-    worstWorry(inp),
-    leaveNoExit(inp, s.brand),
-    vendorOutlier(inp, s.brand),
-  ].filter((x): x is Insight => x !== null && x.effect > 0);
+
+/** A finished insight: plain text, each number's fact id under `facts`, each bar's fact and its example answers (the
+ * bar's own fact's answers). */
+function finishInsight(ins: Insight, inp: InsightInputs): Insight {
+  const facts: Record<string, StmtNums> = {};
+  const fin = (field: string, text: string) => {
+    const r = finish(extremeWords(text));
+    if (r.nums.length) facts[field] = r.nums;
+    return r.text;
+  };
+  const viz = ins.viz?.map((b, i) => {
+    const r = finish(b.text);
+    if (r.nums.length) facts[`viz.${i}`] = r.nums;
+    const ref = r.nums.length === 1 ? r.nums[0][2] : undefined;
+    const refs = ref && inp.F ? refsFor(inp.F.rf, ref, EXAMPLES) : [];
+    return { ...b, text: r.text, ...(ref ? { fact: ref } : {}), ...(refs.length ? { refs } : {}) };
+  });
+  const names = ins.names ? (Object.fromEntries(Object.entries(ins.names).map(([k, v]) => [k, typeof v === "string" ? finish(v).text : v])) as MoveNames) : undefined;
+  return {
+    ...ins,
+    title: fin("title", ins.title),
+    body: fin("body", ins.body),
+    foot: finish(ins.foot).text,
+    ...(viz ? { viz } : {}),
+    ...(names ? { names } : {}),
+    ...(Object.keys(facts).length ? { facts } : {}),
+  };
+}
+
+function rankedRun(s: Summary, inp: InsightInputs, decisions?: Decision[]): Insight[] {
+  const detectors: [string, () => Insight | null][] = [
+    ["engine_spread", () => engineSpread(s)],
+    ["engine_mode", () => modeGap(s)],
+    ["engine_vendor", () => vendorGap(s, inp)],
+    ["room_win", () => roomWin(inp)],
+    ["room_value", () => roomValue(inp, s.brand)],
+    ["rival_open", () => rivalOpen(s)],
+    ["rival_h2h", () => rivalHeadToHead(s)],
+    ["argument", () => argument(s)],
+    ["doubt_rollup", () => doubtRollup(s)],
+    ["doubt_worry", () => doubtWorry(inp)],
+    ["funnel", () => funnelDrop(s)],
+    ["prompted_vs_open", () => promptedVsOpen(s)],
+    ["pick_concentration_room", () => pickConcentrationRoom(s, inp)],
+    ["pick_concentration_question", () => pickConcentrationQuestion(s, inp)],
+    ["agreed_yet_stay", () => agreedYetStay(inp)],
+    ["taught_vs_winning", () => taughtVsWinning(s, inp)],
+    ["value_in_house", () => valueInHouse(inp, s.brand)],
+    ["advocacy_vs_objection", () => advocacyVsObjection(inp)],
+    ["leaver_capture", () => leaverCapture(inp)],
+    ["own_defense", () => ownDefense(inp)],
+    ["away_condition", () => awayCondition(s, inp)],
+    ["assigned_exception", () => assignedException(s, inp)],
+    ["engine_decisiveness", () => engineDecisiveness(s)],
+    ["engine_h2h_flip", () => engineHeadToHeadFlip(s)],
+    ["engine_pick_concentration", () => enginePickConcentration(s, inp)],
+    ["neutralized_differentiator", () => neutralizedDifferentiator(inp)],
+    ["argument_flip", () => argumentFlip(inp)],
+    ["conversion_vs_rival", () => conversionVsRival(s)],
+    ["unasked_rival", () => unaskedRival(s, inp)],
+    ["leak_picks", () => leakPicks(inp)],
+    ["leak_problem", () => leakProblem(inp)],
+    ["worst_worry", () => worstWorry(inp)],
+    ["leave_no_exit", () => leaveNoExit(inp, s.brand)],
+    ["vendor_outlier", () => vendorOutlier(inp, s.brand)],
+  ];
+  const found: Insight[] = [];
+  for (const [key, run] of detectors) {
+    openGates();
+    let ins: Insight | null;
+    try {
+      ins = run();
+    } finally {
+      const gates = closeGates();
+      if (decisions) decisions.push({ key, fired: false, gates });
+      if (decisions) decisions[decisions.length - 1].gates = gates;
+    }
+    const fired = !!ins && ins.effect > 0;
+    if (decisions) decisions[decisions.length - 1].fired = fired;
+    if (fired) found.push(finishInsight(ins!, inp));
+  }
   return found.sort((a, b) => b.effect - a.effect || a.key.localeCompare(b.key));
 }

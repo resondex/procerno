@@ -3842,6 +3842,7 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const topRival = inp.pooled ? [...(won?.rivals ?? [])].sort((a, b) => b.num.pct - a.num.pct)[0]?.name : undefined;
       p.detail = h2hDetail({
         exception: !!(inp.exception && decided?.here && won?.vs),
+        ...(inp.exception?.lostRate !== undefined ? { exceptionShare: inp.exception.lostRate } : {}),
         rival: R,
         pooled: !!inp.pooled,
         side,

@@ -40,6 +40,14 @@
  *          | ownopt:<product id>    a price answer points to that product of the tracker as its own cheaper option
  *          | rulename:<choice>:<form>,<form>...  a rule choosing <choice> names, as its product, one of these names as
  *                                   written (no brand in the category; each form URI-encoded, lower case)
+ *          | sit:<situation> | sit:~none   the question's buying situation (URI-encoded) / asked of no particular buyer
+ *          | worry:<worry>          the question's worry (URI-encoded)
+ *          | stage:<stage>          the question's stage
+ *          | cell:<intent id>       the question's cell (a seed and its paraphrases)
+ *          | eng:<id>,<id>...       answered by one of these assistants
+ *          | recin                  some brand in analysis is recommended (a pick counts)
+ *          | args                   the answer carries arguments or topics (its schema asks them)
+ *          | argany:<code>,<code>   it argues one of these codes (URI-encoded)
  *   <key>   a brand's dictionary entry id, "you" (the tracker) or "rival" (the answer's own named rival)
  *   <bucket> none | in_analysis | outside_analysis | outside_category  (ruling 8)
  *
@@ -222,6 +230,39 @@ function term(t: string, set: AnswerFactSet): Pred {
     case "sentname": {
       const want = arg.trim().toLowerCase();
       return (f) => !!f.sent && (f.sent.brands.some((b) => b.name.toLowerCase() === want) || f.sent.outside.some((w) => w.trim().toLowerCase() === want));
+    }
+    // Statements (layer 4) cut a scope by the question's own facts: its buying situation, its worry and stage, its
+    // cell, its assistants - so "every other buying situation" or "the answers of these assistants" is one fact.
+    case "sit": {
+      // sit:~none = asked of no particular buyer; otherwise the situation as written (URI-encoded).
+      if (arg === "~none") return (f) => f.situation === null;
+      const want = decodeURIComponent(arg);
+      return (f) => f.situation === want;
+    }
+    case "worry": {
+      const want = decodeURIComponent(arg);
+      return (f) => f.worry === want;
+    }
+    case "stage":
+      return (f) => f.stage === arg;
+    case "cell":
+      return (f) => f.intentId === arg;
+    case "eng": {
+      const ids = new Set(arg.split(","));
+      return (f) => ids.has(f.engine.id);
+    }
+    case "price":
+      // A price answer's one "instead" bucket (ruling 3): rival / own / nowhere.
+      return (f) => f.price?.bucket === arg;
+    case "recin":
+      // Some brand in analysis is recommended (the pick counting, ruling 6).
+      return (f) => f.brands.some((b) => b.recommended && b.bucket === "in_analysis");
+    case "args":
+      // The answer carries arguments (or topics) - its schema asks them.
+      return (f) => f.args !== null;
+    case "argany": {
+      const codes = arg.split(",").map((x) => decodeURIComponent(x));
+      return (f) => !!f.args && codes.some((c) => f.args!.includes(c));
     }
     default:
       throw new Error(`fact layer: slice "${t}": unknown term "${head}"`);

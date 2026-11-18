@@ -560,8 +560,10 @@ export function criteriaDetail(gap: boolean, plural: string): { heading: string;
 /** Head-to-head default explanation: no number the two step bars draw.
  * am37: the body supports its own heading - where the side that loses still
  * wins (the top condition quoted), or why a close matchup can turn. */
-export function h2hDetail(o: { exception: boolean; rival: string; pooled: boolean; side: "you" | "rival" | "close"; always?: boolean; rivalCond?: string; youCond?: string; topRival?: string }): { heading: string; body: PanelText } {
-  if (o.exception) return { heading: "You lose this one - with an exception", body: join(`Most of the answers that pick ${o.rival} still say when to choose you.`) };
+export function h2hDetail(o: { exception: boolean; rival: string; pooled: boolean; side: "you" | "rival" | "close"; always?: boolean; rivalCond?: string; youCond?: string; topRival?: string; exceptionShare?: number }): { heading: string; body: PanelText } {
+  // "Most" only when over half of the answers that pick the rival still give a case for you (inventory fault 3).
+  const most = o.exceptionShare === undefined || o.exceptionShare > 0.5 ? "Most" : Math.round(o.exceptionShare * 100) === 50 ? "Half" : "Some";
+  if (o.exception) return { heading: "You lose this one - with an exception", body: join(`${most} of the answers that pick ${o.rival} still say when to choose you.`) };
   const R = o.pooled ? "your named rivals" : o.rival;
   const heading =
     o.side === "you"
