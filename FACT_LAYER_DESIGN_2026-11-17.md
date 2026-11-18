@@ -138,6 +138,15 @@ Confirmed by Tyler the same day:
   list like it, the card shows it as "outside the category", its own share.
 - **13. Premium vs basic: an answer with no stance is its own share**, never added into "balanced".
 
+- **14. One grouping of conditions per run, used everywhere** (Tyler: "do it once in both places, use whichever is most
+  valid ... I just need the process to be right"). The run-wide grouping the reason rows, the Brief and the findings
+  read is the one; the Map's own second grouping (both-sides pairs, Premium vs basic rows) is retired. A group's row
+  label is a plain descriptive wording of what the buyer does or has (his example of the style he prefers: "heavy
+  restaurant spending" over "For restaurant tabs") - a labelling preference, not a blocker.
+- **15. One grouping of product names, used everywhere** (Tyler: "don't care, just harmonize ... it's labelling, not
+  number generation", never a blocker). One rule decides which written names are one product; each product carries a
+  full name and a short name, and a card that needs a truncated view shows the short one.
+
 The list of every number each ruling moves, measured on the test copy of all six trackers: `RULING_MOVES_2026-11-17.md`
 (raw data in `~/Documents/procerno_eval/engine_inventory_2026-11-17/rulings/`). Ruling 7 moves 6,789 drawn numbers; under it
 What's popular answers need their own group on the Data page.
