@@ -859,10 +859,10 @@ export function TableView({ table }: { table: PanelTable }) {
                   {r.seldom && <SeldomTag />}
                 </td>
                 {r.cells.map((c, i) => (
-                  <td key={i} className={`whitespace-nowrap py-1.5 pl-3 text-right ${c && "t" in c && !("refs" in c && c.refs?.length) ? `${T.cap} text-ink-3` : "text-ink"}`}>
+                  <td key={i} className={`whitespace-nowrap py-1.5 pl-2 text-right sm:pl-3 ${c && "t" in c && !("refs" in c && c.refs?.length) ? `${T.cap} text-ink-3` : "text-ink"}`}>
                     {table.mark && i === table.mark.col && c && !isSpan(c) ? (
                       <span className="inline-flex items-center gap-2">
-                        <span className="relative inline-block h-2 w-[110px] rounded bg-line/60">
+                        <span className="relative inline-block h-2 w-7 rounded bg-line/60 sm:w-[72px]">
                           <i className="block h-full rounded" style={{ width: `${Math.min(100, c.pct)}%`, background: c.pct >= table.mark.pct ? C_YOU : C_USUAL }} />
                           <i className="absolute -top-[3px] h-[14px] border-l-[1.5px] border-ink" style={{ left: `${Math.min(100, table.mark.pct)}%` }} />
                         </span>

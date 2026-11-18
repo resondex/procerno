@@ -1268,7 +1268,7 @@ export default function BriefSection({
     "pb-sans rounded-md border border-line bg-surface px-2.5 py-1 text-[13px] font-medium text-ink hover:border-ink-3 focus-visible:outline-2 focus-visible:outline-primary";
 
   return (
-    <div className="-mt-2 grid gap-4">
+    <div className="-mt-2 grid grid-cols-1 gap-4">
       <style>{BRIEF_CSS}</style>
       <div className="pb-sans relative flex flex-wrap items-center gap-x-4 gap-y-2 whitespace-nowrap">
         {/* bf26: one "View as" menu for the frames (it opens on "Now what?"; a remembered choice still wins). */}
