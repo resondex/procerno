@@ -241,7 +241,7 @@ function tallyOf(rows: { bucket: Bucket }[]) {
 
 async function computeKind(data: ViewData, kind: "entity" | "class", request: ViewRequest = {}): Promise<HeadToHeadView | null> {
   const { project, dictionary } = data;
-  const resolve = buildResolver(dictionary, data.judged);
+  const resolve = buildResolver(dictionary, data.judged, data.names);
   const targetKey = resolve(project.brand).key;
   const viewKey = kind === "entity" ? "head_to_head_entity" : "head_to_head_class";
   const { rows: pool, uncoded, core } = poolOf(data, viewKey, request);

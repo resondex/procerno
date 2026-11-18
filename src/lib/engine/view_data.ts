@@ -4,7 +4,7 @@ import { wilson } from "./metrics";
 import { cachedRunRevision } from "./run_revision";
 import { viewsOf, type ViewKey } from "./views";
 import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION, primeContextVerdicts } from "./context_judge";
-import { RESOLVE_VERSION, expandCoNamed } from "./brand_resolve";
+import { RESOLVE_VERSION, expandCoNamed, writtenNames } from "./brand_resolve";
 import { ENGINES, engineFacets, type EngineFacets } from "./providers";
 import type { ConditionKeysCache } from "./condition_groups";
 import type { AnswerCodes, DictionaryEntry, Intent, Project, Prompt, Run } from "../types";
@@ -40,6 +40,9 @@ export interface ViewData {
   prompts: Prompt[];
   intents: Intent[];
   dictionary: DictionaryEntry[];
+  /** Every name as written in the coded answers (brand_resolve.ts writtenNames) - given to every resolver a view
+   * builds, so every spelling of one match key resolves the same way whatever order it is met in (rs4). */
+  names: string[];
   /** projects.setup_decision JSON - loaded only for views that ask for it. */
   setupDecision?: string | null;
   /** projects.code_groups JSON - loaded only for views that ask for it. */
@@ -176,6 +179,7 @@ interface SharedLoad {
   prompts: Prompt[];
   intents: Intent[];
   dictionary: DictionaryEntry[];
+  names: string[];
 }
 
 /** Entries expire after this long - the backstop for anything the key cannot
@@ -363,10 +367,12 @@ async function readShared(run: Run, project: Project, source: string): Promise<S
     store.listIntents(project.id),
     store.getDictionary(project.id),
   ]);
+  // A name carrying two tracked brands counts as naming both (rs3).
+  const expanded = expandCoNamed(codes, dictionary);
   return {
     source,
-    // A name carrying two tracked brands counts as naming both (rs3).
-    codes: expandCoNamed(codes, dictionary),
+    codes: expanded,
+    names: writtenNames(expanded),
     responses: responses.map((r) => ({ id: r.id, prompt_id: r.prompt_id, model: r.model })),
     prompts,
     intents,
@@ -390,12 +396,13 @@ export async function loadViewData(
     opts.setupDecision ? store.getSetupDecision(project.id) : Promise.resolve(undefined),
     opts.codeGroups ? store.getCodeGroups(project.id) : Promise.resolve(undefined),
   ]);
-  const { codes, responses, prompts, intents, dictionary } = shared;
+  const { codes, responses, prompts, intents, dictionary, names } = shared;
   const data: ViewData = {
     run,
     project,
     source,
     codes,
+    names,
     responses,
     prompts,
     intents,

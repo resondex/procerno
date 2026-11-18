@@ -310,7 +310,7 @@ function factsOf(
 function valueFacts(data: ViewData, request: ViewRequest) {
   const { project, dictionary } = data;
   const { rows: pool, uncoded, core } = poolOf(data, "value", request);
-  const resolve = buildResolver(dictionary, data.judged);
+  const resolve = buildResolver(dictionary, data.judged, data.names);
   const targetKey = resolve(project.brand).key;
   const lines = decidedLines(data.setupDecision);
   const basis = ownBasis(resolve, project.brand, project.category, lines);

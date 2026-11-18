@@ -363,7 +363,7 @@ function computeDefensive(data: ViewData, resolve: Resolver, targetKey: string, 
 }
 
 export function computeAlternatives(data: ViewData, request: ViewRequest = {}): AlternativesViews {
-  const resolve = buildResolver(data.dictionary, data.judged);
+  const resolve = buildResolver(data.dictionary, data.judged, data.names);
   const targetKey = resolve(data.project.brand).key;
   return {
     runId: data.run.id,

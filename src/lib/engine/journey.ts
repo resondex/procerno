@@ -20,7 +20,10 @@ import { buildResolver, type Resolver } from "./brand_resolve";
 import { roleOf } from "./headline";
 import { matchKey } from "../brand_key";
 import { STATION_LABEL, stationQuestion, viewsOf, type StationKey, type ViewKey } from "./views";
-import { cachedView, cell, requestOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
+import { cachedView, cell, loadViewData, requestOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
+import { sharedRunFacts } from "./facts/overview_facts";
+import { cachedRunRevision } from "./run_revision";
+import type { Scope } from "./facts/fact";
 import type { DictionaryEntry, Project, Run } from "../types";
 
 export type { RateCell, StationKey };
@@ -89,7 +92,7 @@ export type { RateCell, StationKey };
  */
 
 /** Bumped whenever the payload shape or a number's meaning changes. */
-export const JOURNEY_VERSION = "j7"; // j7 (2026-11-16): the two settled rows carry the Map names (What to use alongside you, Answering a critic). // j6 (2026-11-10): the tightened wall test (shown wording only, own-brand complaints excluded)
+export const JOURNEY_VERSION = "j8"; // j8 (2026-11-17, fact layer step 6): Value's "who is recommended instead" is a fact per rival - the share of every price answer recommending it instead (its numerator had counted the doubting answers only, its base every price answer); the tracker's own cheaper options leave that list. // j7 (2026-11-16): the two settled rows carry the Map names (What to use alongside you, Answering a critic). // j6 (2026-11-10): the tightened wall test (shown wording only, own-brand complaints excluded)
 
 export interface JourneyMetric {
   key: string;
@@ -162,6 +165,8 @@ export interface JourneyPick {
   name: string;
   role: "target" | "rival" | "other";
   cell: RateCell;
+  /** The fact the cell is (fact layer), where the station's figure is one (Value's "who is recommended instead"). */
+  fact?: string;
 }
 
 export interface JourneyArgument {
@@ -540,7 +545,7 @@ export async function computeStationReasons(data: ViewData, request: ViewRequest
     const hit = RULE_VIEWS.find(([v]) => views.includes(v));
     if (hit) poolOfIntent.set(it.id, hit[1]);
   }
-  const resolve = buildResolver(data.dictionary, data.judged);
+  const resolve = buildResolver(data.dictionary, data.judged, data.names);
   // An "elsewhere" half of a condition the "away" pass themed reads under that theme.
   const awayLabelByCond = new Map(awayPool.map((g) => [g.cond, g.label] as const));
   const loseGroups = rankGroups([...awayPool, ...elsewherePool]);
@@ -875,17 +880,31 @@ export async function computeJourney(run: Run, project: Project, request: ViewRe
   // ---------- Value ----------
   const val = value && value.answers > 0 ? value : null;
   const topInstead = val?.instead[0];
-  // Picks = brands recommended instead, as a share of the value answers
-  // (room-pinned, same-set rule over the all-buyers list).
-  const insteadList = (v: { worth: { yes: RateCell }; instead: { name: string; n: number }[] }): JourneyPick[] =>
-    v.instead.map((x) => ({ name: x.name, role: roleByName(x.name), cell: cell(x.n, v.worth.yes.n) }));
+  // Picks = rivals recommended instead, each a FACT (fact layer step 6; inventory section 5 fault 2): the share of
+  // the price answers - every one, ruling 3 - that recommend the rival instead (measure named_instead), in the
+  // room under a room filter. The list is the all-buyers view's rivals (same-set rule); the tracker's own cheaper
+  // options are not brands and are shown on the Value card.
   const valBase = (filtered ? valueAll : value) ?? null;
-  const valuePicks: JourneyPick[] =
-    !val || !valBase || valBase.answers === 0
-      ? []
-      : filtered
-        ? sameSet(insteadList(valBase), insteadList(val), val.worth.yes.n)
-        : insteadList(val).sort((a, b) => rate(b.cell) - rate(a.cell) || a.name.localeCompare(b.name));
+  let valuePicks: JourneyPick[] = [];
+  if (val && valBase && valBase.answers > 0) {
+    const vdata = await loadViewData(run, project, { setupDecision: true, judge: true });
+    if (vdata) {
+      vdata.revision = await cachedRunRevision(run.id);
+      const { book, set } = await sharedRunFacts(vdata, all);
+      const scope: Scope = { types: ["pricing"], ...(filtered ? { situation: room } : {}) };
+      const seen = new Set<string>();
+      valuePicks = valBase.instead
+        .filter((x) => !x.own)
+        .flatMap((x) => {
+          const r = set.resolve(x.name);
+          if (r.status !== "active" || r.key === set.target.key || set.bucketOf(r.key) !== "in_analysis" || seen.has(r.key)) return [];
+          seen.add(r.key);
+          const f = book.fact("named_instead", r.key, scope);
+          return [{ name: x.name, role: roleByName(x.name), cell: cell(f.k, f.n), fact: f.id }];
+        })
+        .sort((a, b) => rate(b.cell) - rate(a.cell) || a.name.localeCompare(b.name));
+    }
+  }
   const valueStation = station("value", project, {
     lead: val ? m("worth_it", "Worth it", val.worth.yes, false) : null,
     sub: val ? [m("not_worth_it", "Not worth it", val.worth.no, false)] : [],

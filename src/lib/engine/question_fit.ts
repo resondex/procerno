@@ -1,5 +1,5 @@
 import { wilson } from "./metrics";
-import { buildResolver } from "./brand_resolve";
+import { buildResolver, writtenNames } from "./brand_resolve";
 import { promptsForRun } from "./surfaces";
 import type { AnswerCodes, DictionaryEntry, Intent, Prompt, Run } from "../types";
 
@@ -70,7 +70,7 @@ export function computeQuestionFit(args: {
    * matchups.matchupPromptsNotAsked). Absent = none. */
   notAsked?: Set<string>;
 }): FitResult {
-  const resolve = buildResolver(args.dictionary, args.judged);
+  const resolve = buildResolver(args.dictionary, args.judged, writtenNames(args.codes));
   const intentById = new Map(args.intents.map((i) => [i.id, i]));
   const codeById = new Map(args.codes.map((c) => [c.response_id, c]));
   const idsByPrompt = new Map<string, string[]>();

@@ -35,8 +35,11 @@ import type { DictionaryEntry } from "../types";
  * once. rs2 (2026-11-13): family containment needs whole words - a form
  * that only splits a hyphenated word no longer claims the name. rs3
  * (2026-11-14): a name carrying two tracked brands counts as naming both
- * (expandCoNamed). */
-export const RESOLVE_VERSION = "rs3";
+ * (expandCoNamed). rs4 (2026-11-17, fact layer step 6): resolution no longer depends on the order names
+ * are met - the memo was keyed by the match key, so two spellings sharing one ("Hulu + Live TV" / "Hulu+Live TV")
+ * both took whichever the resolver met first; each spelling now resolves on its own, and every spelling of one match
+ * key among the names the resolver is given (the run's written names) resolves as the best of them. */
+export const RESOLVE_VERSION = "rs4";
 
 export type ResolvedStatus = "active" | "rejected" | "pending" | "unknown";
 
@@ -54,7 +57,7 @@ export interface Resolved {
 /** `judged` maps matchKey(name as written) -> the judge's maker name; the
  * maker resolves through the CURRENT dictionary here, never at judge time,
  * so board edits re-resolve judged names for free. */
-export function buildResolver(entries: DictionaryEntry[], judged?: Map<string, string>) {
+export function buildResolver(entries: DictionaryEntry[], judged?: Map<string, string>, names?: Iterable<string>) {
   const exact = new Map<string, DictionaryEntry>();
   const rank = { active: 0, rejected: 1, pending: 2 } as const;
   for (const e of entries) {
@@ -73,6 +76,9 @@ export function buildResolver(entries: DictionaryEntry[], judged?: Map<string, s
     return out;
   };
   const families = [familyOf("active"), familyOf("rejected")];
+  // Memoized by the name AS WRITTEN: two spellings that share a match key can differ in their words ("Hulu + Live
+  // TV" carries the word "hulu", "Hulu+Live TV" does not), so a match-key memo made the second spelling inherit
+  // whatever the first resolved to - the order names were met decided the count (ENGINE_INVENTORY section 5 #1).
   const memo = new Map<string, Resolved>();
   const label = (e: DictionaryEntry) => e.display_name ?? e.canonical;
 
@@ -114,10 +120,10 @@ export function buildResolver(entries: DictionaryEntry[], judged?: Map<string, s
       : { status: "unknown", key: `?${mk}`, name: maker.trim(), entry: null, via: "judge" };
   };
 
-  return function resolve(raw: string): Resolved {
-    const k = matchKey(raw);
-    const hit = memo.get(k);
+  const resolveRaw = (raw: string): Resolved => {
+    const hit = memo.get(raw);
     if (hit) return hit;
+    const k = matchKey(raw);
     let out = base(raw, k);
     if (out.status === "unknown") {
       out = viaJudge(k) ?? out;
@@ -130,9 +136,55 @@ export function buildResolver(entries: DictionaryEntry[], judged?: Map<string, s
       const j = viaJudge(k);
       if (j?.entry && j.entry.status !== "pending") out = j;
     }
-    memo.set(k, out);
+    memo.set(raw, out);
     return out;
   };
+
+  // One result per match key among the names given: every spelling of a key resolves as its BEST spelling, chosen
+  // by a rule that depends only on the set of spellings, never on their order - a placed entry over a ruled-out one
+  // over one awaiting review over unknown; then exact over family over the judge; then the spelling written most;
+  // then the spelling's own sort order. Names never given resolve on their own spelling.
+  const canon = new Map<string, string>();
+  if (names) {
+    const byKey = new Map<string, Map<string, number>>();
+    for (const n of names) {
+      if (!n) continue;
+      const k = matchKey(n);
+      const m = byKey.get(k) ?? new Map<string, number>();
+      m.set(n, (m.get(n) ?? 0) + 1);
+      byKey.set(k, m);
+    }
+    const statusRank = { active: 0, rejected: 1, pending: 2, unknown: 3 } as const;
+    const viaRank = (v: Resolved["via"]) => (v === "exact" ? 0 : v === "family" ? 1 : v === "judge" ? 2 : 3);
+    for (const [k, spellings] of byKey) {
+      if (spellings.size < 2) continue;
+      const best = [...spellings.entries()]
+        .map(([raw, count]) => ({ raw, count, r: resolveRaw(raw) }))
+        .sort((a, b) => statusRank[a.r.status] - statusRank[b.r.status] || viaRank(a.r.via) - viaRank(b.r.via) || b.count - a.count || (a.raw < b.raw ? -1 : a.raw > b.raw ? 1 : 0))[0];
+      canon.set(k, best.raw);
+    }
+  }
+  /** The spelling a name resolves as (itself unless another spelling of its match key was given and ranks first). */
+  const spelling = (raw: string) => (canon.size ? canon.get(matchKey(raw)) ?? raw : raw);
+  return Object.assign((raw: string): Resolved => resolveRaw(spelling(raw)), { spelling });
+}
+
+/** Every name as written in a set of coded answers (mentions, picks, destinations, redirects, pairings, rule
+ * choices and products) - the spellings a resolver is given (buildResolver's `names`). */
+export function writtenNames(codes: AnswerCodes[]): string[] {
+  const out: string[] = [];
+  for (const c of codes) {
+    for (const m of c.mentions ?? []) if (m?.brand) out.push(m.brand);
+    if (c.top_pick) out.push(c.top_pick);
+    for (const d of c.destinations ?? []) if (d) out.push(d);
+    for (const d of c.redirect_to ?? []) if (d) out.push(d);
+    for (const p of c.pairings ?? []) if (p?.name) out.push(p.name);
+    for (const r of c.decision_rules ?? []) {
+      if (r?.choice) out.push(r.choice);
+      if (r?.product) out.push(r.product);
+    }
+  }
+  return out;
 }
 
 export type Resolver = ReturnType<typeof buildResolver>;
@@ -148,7 +200,7 @@ export type Resolver = ReturnType<typeof buildResolver>;
  * only when the other brand's form sits on different words than the entry
  * the resolver picks - two forms reading the same words are one brand.
  */
-export function buildCoNamed(entries: DictionaryEntry[]) {
+export function buildCoNamed(entries: DictionaryEntry[], spelling: (raw: string) => string = (raw) => raw) {
   const exact = new Set<string>();
   for (const e of entries) for (const f of [e.canonical, ...e.aliases]) exact.add(matchKey(f));
   const forms: { seq: string[]; entry: DictionaryEntry }[] = [];
@@ -156,10 +208,13 @@ export function buildCoNamed(entries: DictionaryEntry[]) {
     if (e.status !== "active" || e.canonical === "Other") continue;
     for (const f of [e.canonical, ...e.aliases]) forms.push({ seq: famTokens(f), entry: e });
   }
+  // Memoized by the spelling a name resolves as (rs4): never by match key, which made the result depend on the
+  // spelling met first.
   const memo = new Map<string, DictionaryEntry[]>();
-  return function coNamed(raw: string): DictionaryEntry[] {
+  return function coNamed(written: string): DictionaryEntry[] {
+    const raw = spelling(written);
     const k = matchKey(raw);
-    const hit = memo.get(k);
+    const hit = memo.get(raw);
     if (hit) return hit;
     let out: DictionaryEntry[] = [];
     if (!exact.has(k)) {
@@ -183,7 +238,7 @@ export function buildCoNamed(entries: DictionaryEntry[]) {
           .map((b) => b.entry);
       }
     }
-    memo.set(k, out);
+    memo.set(raw, out);
     return out;
   };
 }
@@ -195,8 +250,8 @@ export function buildCoNamed(entries: DictionaryEntry[]) {
  * with the one entry the resolver gives it. Rows without such a name are
  * returned as they are (same object). Pure. */
 export function expandCoNamed(codes: AnswerCodes[], entries: DictionaryEntry[]): AnswerCodes[] {
-  const coNamed = buildCoNamed(entries);
-  const resolve = buildResolver(entries);
+  const resolve = buildResolver(entries, undefined, writtenNames(codes));
+  const coNamed = buildCoNamed(entries, resolve.spelling);
   return codes.map((c) => {
     const ms = c.mentions;
     if (!ms || ms.length === 0) return c;

@@ -348,7 +348,7 @@ export interface RulesCapture {
 
 export async function computeRules(data: ViewData, request: ViewRequest = {}, capture?: RulesCapture): Promise<RulesView> {
   const { project, dictionary } = data;
-  const resolve = buildResolver(dictionary, data.judged);
+  const resolve = buildResolver(dictionary, data.judged, data.names);
   const target = resolve(project.brand);
   const targetKey = target.key;
 

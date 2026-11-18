@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Intent, Prompt, Run } from "@/lib/types";
-import type { ViewKey } from "@/lib/engine/views";
+import type { DataPoolKey } from "@/lib/engine/facts/measure_book";
 import { healthChecks } from "@/lib/engine/prompt_health_rule";
 import { QUESTION_TYPE_LABEL, QUESTION_TYPE_ORDER, questionTypeOf } from "./question_types";
 
@@ -64,7 +64,7 @@ export function groupPromptsForHealth(
     const it = p.intent_id ? intentById.get(p.intent_id) : undefined;
     const checked = healthChecks(p, it);
     let cell: HealthCell & { seq: number };
-    const type: ViewKey | null = it ? questionTypeOf(it.stage, it.angle) : null;
+    const type: DataPoolKey | null = it ? questionTypeOf(it.stage, it.angle) : null;
     if (!it || !type) {
       const theme = it ? `stage:${it.stage}` : (p.theme as string);
       otherChecked ||= checked;

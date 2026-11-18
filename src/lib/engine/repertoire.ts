@@ -71,7 +71,7 @@ export function computeRepertoire(data: ViewData, request: ViewRequest = {}): Re
   const { project } = data;
   const { rows: pool, uncoded, core } = poolOf(data, "repertoire", request);
   if (pool.length === 0 && uncoded === 0) return null;
-  const resolve = buildResolver(data.dictionary, data.judged);
+  const resolve = buildResolver(data.dictionary, data.judged, data.names);
   const targetKey = resolve(project.brand).key;
 
   const facts: Facts[] = pool.map((row) => {

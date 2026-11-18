@@ -27,8 +27,7 @@
  *  - numbers inside sentences with no counts are not facts: each is checked against the covered facts' printed
  *    numbers on the same card (equal text = it can cite that fact), and the rest are listed by path prefix - the
  *    statements layer's input;
- *  - a sample of the Data page's measures (workbench.ts facts + measures.ts definitions) is recomputed from its own
- *    fact table and compared with the same fact.
+ *  - the Data page is checked by scripts/data_page_harness.mts (it reads these facts since step 6).
  *
  * Env: FACT_DUMP=<file> writes every uncovered stat (JSON lines); FACT_FAIL=<file> writes every unexplained one.
  *
@@ -49,9 +48,6 @@ const { cachedRunRevision } = await import(ROOT + "/src/lib/engine/run_revision.
 const { buildAnswerFacts } = await import(ROOT + "/src/lib/engine/facts/answer_facts.ts");
 const { factBook, WHAT_TO_BUY_ALL } = await import(ROOT + "/src/lib/engine/facts/fact.ts");
 const { printWhole, printOf, MEASURE_BY_ID } = await import(ROOT + "/src/lib/engine/facts/measure_book.ts");
-const { computeWorkbench } = await import(ROOT + "/src/lib/engine/workbench.ts");
-const { MEASURE_BY_ID: DATA_MEASURES } = await import(ROOT + "/src/lib/engine/measures.ts");
-const { buildResolver } = await import(ROOT + "/src/lib/engine/brand_resolve.ts");
 const { attachConditions } = await import(ROOT + "/src/lib/engine/facts/conditions.ts");
 const { condRowLabel } = await import(ROOT + "/src/lib/engine/panel_text.ts");
 const { isDefaultCondition } = await import(ROOT + "/src/lib/engine/condition_groups.ts");
@@ -133,9 +129,6 @@ const byMeasure = new Map<string, number>();
 const totals = { compared: 0, equal: 0, explained: new Map<string, number>(), unexplained: 0, notCovered: 0, notCoveredBy: new Map<string, number>(), sentMatched: 0, sentUnmatched: 0, sentByPrefix: new Map<string, number>() };
 const failures: string[] = [];
 const dumpRows: string[] = [];
-let crossChecked = 0;
-let crossEqual = 0;
-let crossKnown = 0;
 
 for (const project of (await store.listProjects()).filter((p: any) => !p.archived_at)) {
   const run = (await store.listRuns(project.id))[0];
@@ -1614,105 +1607,7 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
     else local.unexplained.push(`${stat.id} = ${stat.value} (${stat.k}/${stat.n}); fact ${f.id} = ${f.text} (${f.k}/${f.n})${(alts ?? []).length ? `; tried ${(alts ?? []).map((a) => { const x = a.calc(); return `${a.label.split(" (")[0]} ${x.k}/${x.n}`; }).join(", ")}` : ""}`);
   }
 
-  /* ---------- the Data page cross-check (a sample) ---------- */
-  const wb: any = computeWorkbench(data);
-  const POOL_SCOPE: Record<string, Scope> = {
-    headline: WHAT_TO_BUY_TODAY,
-    premium_tier: { types: ["premium_worth"] },
-    head_to_head_entity: { types: ["comparison_entity"] },
-    head_to_head_class: { types: ["comparison_class"] },
-    offensive_capture: { types: ["switching"] },
-    defensive_hold: { types: ["looking_around"] },
-    value: { types: ["pricing"] },
-    awareness_routing: { types: ["problem_recognition"] },
-    awareness_explainer: { types: ["category_education"] },
-    doubt: { types: ["objections"] },
-    keep_or_leave: { types: ["churn_triggers", "renewal"] },
-    settled_business_case: { types: ["business_case"] },
-    settled_expansion: { types: ["expansion"] },
-    settled_ecosystem: { types: ["ecosystem"] },
-    settled_advocacy: { types: ["advocacy"] },
-  };
-  const PAIRS: [string, string, "brand" | "ai" | "you" | "rival"][] = [
-    ["mentioned", "named", "brand"],
-    ["recommended", "recommended", "brand"],
-    ["chosen", "picked", "brand"],
-    ["share_of_decided", "share_of_picks", "brand"],
-    ["out_of_category", "picks_outside_category", "ai"],
-    ["h2h_you", "h2h_win", "you"],
-    ["h2h_rival", "h2h_win", "rival"],
-    ["h2h_other", "h2h_another", "ai"],
-    ["h2h_two_way", "h2h_two_way", "you"],
-    ["worth_yes", "worth_yes", "ai"],
-    ["worth_depends", "worth_depends", "ai"],
-    ["worth_no", "worth_no", "ai"],
-    ["proceed", "go_ahead", "ai"],
-    ["avoid", "steer_clear", "ai"],
-    ["proceed_undecided", "buyer_no_side", "ai"],
-    ["keep", "stay", "ai"],
-    ["leave", "leave", "ai"],
-    ["keep_undecided", "customer_no_side", "ai"],
-    ["premise_confirms", "agrees", "ai"],
-    ["premise_rebuts", "disagrees", "ai"],
-    ["premise_mixed", "partly_agrees", "ai"],
-    ["routed_category", "routed_category", "ai"],
-    ["routed_adjacent", "routed_adjacent", "ai"],
-    ["routed_none", "routed_none", "ai"],
-    ["rel_strengthens", "relationship_strengthens", "ai"],
-    ["rel_weakens", "relationship_weakens", "ai"],
-    ["growth_backs", "growth_backs", "ai"],
-    ["case_strong", "case_strong", "ai"],
-  ];
-  // Known fault (ENGINE_INVENTORY_2026-11-17.md section 5 #1): two spellings sharing one match key resolve by
-  // whichever the resolver meets first. The answer facts meet mentions in order of appearance; the Data page meets
-  // them as stored. Reproduced: a resolver warmed in stored order, counting "named" the Data page's way.
-  const rawOrderNamed = (key: string, scope: Scope) => {
-    const resolve = buildResolver(data.dictionary, data.judged);
-    for (const c of data.codes) for (const m of c.mentions ?? []) if (m?.brand) resolve(m.brand);
-    const ids = new Set(book.rows(scope).map((f: any) => f.responseId));
-    let k = 0;
-    for (const c of data.codes) {
-      if (!ids.has(c.response_id)) continue;
-      const hit = (c.mentions ?? []).some((m: any) => m?.brand && resolve(m.brand).status === "active" && resolve(m.brand).key === key) || (c.outcome === "pick" && c.top_pick && resolve(c.top_pick).status === "active" && resolve(c.top_pick).key === key);
-      if (hit) k++;
-    }
-    return k;
-  };
-  const brandIdx = new Map(wb.brands.map((b: any, i: number) => [set.resolve(b.name).key, i]));
-  const sampleBrands = [T, ...wb.brands.slice(0, 6).map((b: any) => set.resolve(b.name).key).filter((k: string) => k !== T)].slice(0, 6);
-  for (const [pool, scope] of Object.entries(POOL_SCOPE)) {
-    const promptsIn = new Set<number>(wb.prompts.map((pr: any, i: number) => (pr.views.includes(pool) ? i : -1)).filter((i: number) => i >= 0));
-    const rows = wb.facts.filter((r: any) => promptsIn.has(r[1]));
-    if (!rows.length) continue;
-    for (const [dataId, factMeasure, subj] of PAIRS) {
-      const dm = DATA_MEASURES.get(dataId);
-      if (!dm || (dm.only && !dm.only.includes(pool as any))) continue;
-      const subjects = subj === "brand" ? sampleBrands : [subj];
-      for (const sb of subjects) {
-        let fact: any;
-        try {
-          fact = book.fact(factMeasure, sb === "you" ? "you" : sb, scope);
-        } catch {
-          continue; // not legal on this pool in the fact layer: nothing to compare
-        }
-        let k = 0;
-        let n = 0;
-        const bi = sb === "ai" || sb === "rival" || sb === "you" ? brandIdx.get(T) : brandIdx.get(sb);
-        if (bi === undefined) continue;
-        for (const r of rows) {
-          const v = dm.calc(r, { target: brandIdx.get(T) as number, brands: new Set([bi as number]), arg: -1, prompt: { views: wb.prompts[r[1]].views, rival: wb.prompts[r[1]].rival } });
-          if (v === null) continue;
-          n++;
-          k += v;
-        }
-        crossChecked++;
-        if (k === fact.k && n === fact.n) crossEqual++;
-        else if (dataId === "mentioned" && rawOrderNamed(sb, scope) === k) {
-          crossKnown++;
-        } else local.unexplained.push(`Data page ${pool} ${dataId} (${sb === T ? "you" : set.nameOf(sb)}): ${k}/${n} vs fact ${fact.id} ${fact.k}/${fact.n} (${printWhole(fact.k, fact.n)})`);
-      }
-    }
-  }
+  // The Data page's own check moved to scripts/data_page_harness.mts (step 6: the Data page reads these facts).
 
   /* ---------- sentence numbers: numbers inside sentences that carry no counts ---------- */
   // Not facts (the statements layer will cite them): each either equals - same printed text, same card - a number
@@ -2132,7 +2027,6 @@ for (const [k, v] of [...totals.sentByPrefix.entries()].sort((a, b) => b[1] - a[
   console.log(`Measures with no card stat to compare against (exercised only by the Data page cross-check, or not at all): ${unused.join(", ")}`);
 }
 console.log(movesLoaded ? `RULING_MOVES: ${movesConfirmed} ruling explanations checked against the measured moves (the move's "after" counts equal the fact, or the stat is listed as moved)` : `RULING_MOVES raw data not found at ${MOVES_PATH} - explanations not checked against it`);
-console.log(`Data page cross-check: ${crossChecked} figures recomputed from its own fact table: ${crossEqual} equal to the fact, ${crossKnown} differ by the known resolver-order fault (inventory section 5 #1, the Hulu case: reproduced by a resolver that meets names in stored order)`);
 console.log(`\nLAYER 3 - SELECTIONS (lists compared with the card or Brief that draws them, membership and order):`);
 for (const [k, v] of selTotals) {
   console.log(`  ${k}: ${v.checked} lists - ${v.equal} equal${[...v.explained.entries()].map(([e, n]) => `, ${n} ${e}`).join("")}`);

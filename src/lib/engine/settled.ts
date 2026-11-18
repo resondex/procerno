@@ -119,7 +119,7 @@ function enumCells<V extends string>(rows: PoolRow[], values: readonly V[], fiel
 
 export function computeSettled(data: ViewData, request: ViewRequest = {}): SettledViews {
   const { project, dictionary } = data;
-  const resolve = buildResolver(dictionary, data.judged);
+  const resolve = buildResolver(dictionary, data.judged, data.names);
   const targetKey = resolve(project.brand).key;
   const answerExits = exitResolver(project, dictionary, resolve, targetKey);
   const entryByKey = new Map(dictionary.map((e) => [e.id, e]));

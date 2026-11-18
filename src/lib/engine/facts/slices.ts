@@ -64,7 +64,7 @@
  * Pure: reads AnswerFact records only.
  */
 import type { AnswerFact, AnswerFactSet, Bucket } from "./answer_facts";
-import { VERDICT_FIELDS, type VerdictField } from "./answer_facts";
+import { VERDICT_FIELDS, type VerdictField } from "./basics";
 import { isDefaultCondition } from "../condition_groups";
 import { famTokens } from "../brand_family";
 import { isDescription } from "../value";

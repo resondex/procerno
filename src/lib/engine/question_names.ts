@@ -3,8 +3,7 @@
  * plain-wording pass): ONE list, read by the analysis map's row labels and by
  * the dashboard's question-type names (question_types.ts - Build a table,
  * search, the question check), so a row reads the same everywhere. Keyed by
- * the map's row slug. Engine contract names (measures.ts POOLS) stay as they
- * are and remain the fallback for anything without a name here.
+ * the map's row slug.
  */
 export const ROW_NAME = {
   open: "What to buy",

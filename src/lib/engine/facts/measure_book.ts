@@ -28,7 +28,7 @@
  * Pure: reads AnswerFact records only.
  */
 import type { AnswerFact, AnswerFactSet, QuestionType } from "./answer_facts";
-import { QUESTION_TYPES } from "./answer_facts";
+import { QUESTION_TYPES } from "./basics";
 import { famTokens } from "../brand_family";
 
 /* ------------------------------- floors ------------------------------- */
@@ -203,8 +203,10 @@ export type SubjectRef = string;
 
 export interface MeasureCtx {
   set: AnswerFactSet;
-  /** The subject's brand key (null for "ai" / "rival"). */
+  /** The subject's brand key (null for "ai" / "rival" / a company). */
   brand: string | null;
+  /** A company subject ("co:<name>"): its brands in analysis (fact.ts companyMembers); null otherwise. */
+  brands?: ReadonlySet<string> | null;
   /** True when the subject is "rival" (each answer's own named rival). */
   rival: boolean;
   /** The argument code an argument measure reads. */
@@ -269,9 +271,12 @@ const SETTLED: readonly QuestionType[] = ["business_case", "expansion", "ecosyst
 /* ------------------------------- helpers ------------------------------- */
 
 const all = () => true;
-const named = (f: AnswerFact, key: string | null) => !!key && f.brands.some((b) => b.key === key);
-const recommended = (f: AnswerFact, key: string | null) => !!key && f.brands.some((b) => b.key === key && b.recommended);
 const pickIs = (f: AnswerFact, key: string | null) => !!key && f.pick.state !== "none" && f.pick.key === key;
+/** Is this brand the subject - the subject's one brand, or one of a company subject's brands? */
+const isSubj = (c: MeasureCtx, key: string | null | undefined) => !!key && (c.brands ? c.brands.has(key) : key === c.brand);
+const named = (f: AnswerFact, c: MeasureCtx) => f.brands.some((b) => isSubj(c, b.key));
+const recommended = (f: AnswerFact, c: MeasureCtx) => f.brands.some((b) => isSubj(c, b.key) && b.recommended);
+const picks = (f: AnswerFact, c: MeasureCtx) => f.pick.state !== "none" && isSubj(c, f.pick.key);
 const inAnalysisPick = (f: AnswerFact) => f.pick.state === "in_analysis";
 /** The brand a subject means on this answer ("rival" = the answer's own named rival). */
 const subjectKey = (f: AnswerFact, c: MeasureCtx) => (c.rival ? f.rival?.key ?? null : c.brand);
@@ -306,19 +311,19 @@ const verdict = (id: string, name: string, legal: readonly QuestionType[], field
 
 export const MEASURES: readonly Measure[] = [
   /* -- brand measures -- */
-  { id: "named", name: "Named", subject: "brand", legal: ALL, base: all, hit: (f, c) => named(f, c.brand), print: "whole" },
-  { id: "recommended", name: "Recommended", subject: "brand", legal: ALL, base: all, hit: (f, c) => recommended(f, c.brand), print: "whole" },
-  { id: "picked", name: "Picked, of all answers", subject: "brand", legal: PICK_TYPES, base: all, hit: (f, c) => pickIs(f, c.brand), print: "fine" },
-  { id: "share_of_picks", name: "Share of picks", subject: "brand", legal: PICK_TYPES, base: inAnalysisPick, hit: (f, c) => pickIs(f, c.brand), print: "whole" },
-  { id: "converts", name: "Recommendations that end as the pick", subject: "brand", legal: PICK_TYPES, base: (f, c) => recommended(f, c.brand), hit: (f, c) => pickIs(f, c.brand), print: "whole" },
-  { id: "named_not_recommended", name: "Named but not recommended", subject: "brand", legal: ALL, base: all, hit: (f, c) => named(f, c.brand) && !recommended(f, c.brand), print: "whole" },
+  { id: "named", name: "Named", subject: "brand", legal: ALL, base: all, hit: (f, c) => named(f, c), print: "whole" },
+  { id: "recommended", name: "Recommended", subject: "brand", legal: ALL, base: all, hit: (f, c) => recommended(f, c), print: "whole" },
+  { id: "picked", name: "Picked, of all answers", subject: "brand", legal: PICK_TYPES, base: all, hit: (f, c) => picks(f, c), print: "fine" },
+  { id: "share_of_picks", name: "Share of picks", subject: "brand", legal: PICK_TYPES, base: inAnalysisPick, hit: (f, c) => picks(f, c), print: "whole" },
+  { id: "converts", name: "Recommendations that end as the pick", subject: "brand", legal: PICK_TYPES, base: (f, c) => recommended(f, c), hit: (f, c) => picks(f, c), print: "whole" },
+  { id: "named_not_recommended", name: "Named but not recommended", subject: "brand", legal: ALL, base: all, hit: (f, c) => named(f, c) && !recommended(f, c), print: "whole" },
   {
     id: "negative_when_named_not_recommended",
     name: "Of those named but not recommended, named as one to avoid",
     subject: "brand",
     legal: ALL,
-    base: (f, c) => named(f, c.brand) && !recommended(f, c.brand),
-    hit: (f, c) => f.brands.some((b) => b.key === c.brand && b.negative),
+    base: (f, c) => named(f, c) && !recommended(f, c),
+    hit: (f, c) => f.brands.some((b) => isSubj(c, b.key) && b.negative),
     print: "whole",
   },
   {
@@ -326,8 +331,8 @@ export const MEASURES: readonly Measure[] = [
     name: "Recommended, but another brand is the pick",
     subject: "brand",
     legal: PICK_TYPES,
-    base: (f, c) => recommended(f, c.brand),
-    hit: (f, c) => inAnalysisPick(f) && !pickIs(f, c.brand),
+    base: (f, c) => recommended(f, c),
+    hit: (f, c) => inAnalysisPick(f) && !picks(f, c),
     print: "whole",
   },
   {
@@ -335,7 +340,7 @@ export const MEASURES: readonly Measure[] = [
     name: "Recommended, and no single pick",
     subject: "brand",
     legal: PICK_TYPES,
-    base: (f, c) => recommended(f, c.brand),
+    base: (f, c) => recommended(f, c),
     hit: (f) => f.pick.state === "none",
     print: "whole",
   },
@@ -344,7 +349,7 @@ export const MEASURES: readonly Measure[] = [
     name: "Recommended, and the pick is outside the category",
     subject: "brand",
     legal: PICK_TYPES,
-    base: (f, c) => recommended(f, c.brand),
+    base: (f, c) => recommended(f, c),
     hit: (f) => f.pick.state === "outside_category",
     print: "whole",
   },
@@ -363,7 +368,27 @@ export const MEASURES: readonly Measure[] = [
     subject: "brand",
     legal: ALL,
     base: (f) => f.brands.some((b) => b.bucket === "in_analysis"),
-    hit: (f, c) => named(f, c.brand),
+    hit: (f, c) => named(f, c),
+    print: "whole",
+  },
+
+  {
+    id: "negative",
+    name: "Named as one to avoid, when named",
+    subject: "brand",
+    legal: ALL,
+    base: (f, c) => named(f, c),
+    hit: (f, c) => f.brands.some((b) => isSubj(c, b.key) && b.negative),
+    print: "whole",
+  },
+  {
+    // Ruling 8: first among the brands in analysis the answer names (a brand outside of analysis never counts).
+    id: "named_first",
+    name: "Named first, when named",
+    subject: "brand",
+    legal: ALL,
+    base: (f, c) => named(f, c),
+    hit: (f, c) => isSubj(c, f.brands.filter((b) => b.bucket === "in_analysis").sort((a, b) => a.order - b.order)[0]?.key),
     print: "whole",
   },
 
@@ -373,6 +398,9 @@ export const MEASURES: readonly Measure[] = [
   { id: "picks_outside_category", name: "Picks something outside the category", subject: "ai", legal: PICK_TYPES, base: all, hit: (f) => f.pick.state === "outside_category", print: "whole" },
   verdict("outcome_conditional", "Gives conditions, no pick", PICK_TYPES, "outcome", ["conditional"]),
   verdict("outcome_no_pick", "Picks nothing", PICK_TYPES, "outcome", ["no_pick"]),
+  verdict("outcome_clarification", "Asks the buyer for more", PICK_TYPES, "outcome", ["clarification"]),
+  // The Habit card's "picks another brand": any pick that is not the tracker - in the category or not.
+  { id: "picks_other", name: "Picks something other than the tracker", subject: "ai", legal: PICK_TYPES, base: all, hit: (f, c) => f.pick.state !== "none" && f.pick.key !== c.set.target.key, print: "whole" },
 
   /* -- head-to-heads (the rival is a fact of the question) -- */
   { id: "h2h_win", name: "The pick (head to head)", subject: "brand_or_rival", legal: H2H, base: all, hit: (f, c) => pickIs(f, subjectKey(f, c)), print: "whole" },
@@ -403,9 +431,11 @@ export const MEASURES: readonly Measure[] = [
   { id: "agrees", name: "Agrees the worry is fair", subject: "ai", legal: PREMISE, base: judged, hit: (f) => v(f, "premise_verdict", "confirms"), print: "whole" },
   { id: "partly_agrees", name: "Partly agrees", subject: "ai", legal: PREMISE, base: judged, hit: (f) => v(f, "premise_verdict", "mixed"), print: "whole" },
   { id: "disagrees", name: "Says the worry is wrong", subject: "ai", legal: PREMISE, base: judged, hit: (f) => v(f, "premise_verdict", "rebuts"), print: "whole" },
-  { id: "sent_to", name: "Named as where to go", subject: "brand", legal: DESTS, base: all, hit: (f, c) => !!f.sent?.brands.some((b) => b.key === c.brand), print: "whole" },
+  { id: "sent_to", name: "Named as where to go", subject: "brand", legal: DESTS, base: all, hit: (f, c) => !!f.sent?.brands.some((b) => isSubj(c, b.key)), print: "whole" },
   { id: "sent_to_any", name: "Names another brand to go to", subject: "ai", legal: DESTS, base: all, hit: (f) => (f.sent?.brands.length ?? 0) > 0, print: "whole" },
-  { id: "redirected_to", name: "Redirected to", subject: "brand", legal: REDIRECT, base: all, hit: (f, c) => !!f.sent?.brands.some((b) => b.key === c.brand), print: "whole" },
+  { id: "sent_own", name: "Offers another of the tracker's own products as where to go", subject: "ai", legal: DESTS, base: all, hit: (f) => (f.sent?.own.length ?? 0) > 0, print: "whole" },
+  { id: "redirected_to", name: "Redirected to", subject: "brand", legal: REDIRECT, base: all, hit: (f, c) => !!f.sent?.brands.some((b) => isSubj(c, b.key)), print: "whole" },
+  { id: "redirected_any", name: "Redirects to another brand", subject: "ai", legal: REDIRECT, base: all, hit: (f) => (f.sent?.brands.length ?? 0) > 0, print: "whole" },
 
   /* -- price questions (ruling 3) -- */
   verdict("worth_yes", "Worth it", ["pricing"], "worth_it", ["yes"]),
@@ -414,7 +444,7 @@ export const MEASURES: readonly Measure[] = [
   { id: "instead_rival", name: "Points to a rival", subject: "ai", legal: ["pricing"], base: all, hit: (f) => f.price?.bucket === "rival", print: "whole" },
   { id: "instead_own", name: "Points only to your own cheaper option", subject: "ai", legal: ["pricing"], base: all, hit: (f) => f.price?.bucket === "own", print: "whole" },
   { id: "instead_nowhere", name: "Points nowhere", subject: "ai", legal: ["pricing"], base: all, hit: (f) => f.price?.bucket === "nowhere", print: "whole" },
-  { id: "named_instead", name: "Recommended instead", subject: "brand", legal: ["pricing"], base: all, hit: (f, c) => !!f.price?.rivals.some((r) => r.key === c.brand), print: "whole" },
+  { id: "named_instead", name: "Recommended instead", subject: "brand", legal: ["pricing"], base: all, hit: (f, c) => !!f.price?.rivals.some((r) => isSubj(c, r.key)), print: "whole" },
 
   /* -- problem routing (ruling 5) -- */
   verdict("routed_category", "Points to the category", ROUTED, "category_routed", ["category"]),
@@ -454,14 +484,14 @@ export const MEASURES: readonly Measure[] = [
 
   /* -- arguments (ruling 2) -- */
   { id: "argues", name: "Argues it", subject: "ai", arg: true, legal: ALL, base: all, hit: argues, print: "whole" },
-  { id: "argues_when_picked", name: "Argues it, when the brand is the pick", subject: "brand", arg: true, legal: PICK_TYPES, base: (f, c) => pickIs(f, c.brand), hit: argues, print: "whole" },
+  { id: "argues_when_picked", name: "Argues it, when the brand is the pick", subject: "brand", arg: true, legal: PICK_TYPES, base: (f, c) => picks(f, c), hit: argues, print: "whole" },
   {
     id: "argues_when_other_picked",
     name: "Argues it, when another brand in analysis is the pick",
     subject: "brand",
     arg: true,
     legal: PICK_TYPES,
-    base: (f, c) => inAnalysisPick(f) && !pickIs(f, c.brand),
+    base: (f, c) => inAnalysisPick(f) && !picks(f, c),
     hit: argues,
     print: "whole",
   },
@@ -530,3 +560,182 @@ export function printFine(k: number, n: number): string {
 }
 
 export const printOf = (m: Measure, k: number, n: number) => (m.print === "fine" ? printFine(k, n) : printWhole(k, n));
+
+/* ------------------------------- the Data page's catalog ------------------------------- */
+
+/**
+ * The Data page (step 6) reads THIS rulebook: each number it offers is a measure above, with the measure's own
+ * legality - a number is offered on a group of questions only when the measure is legal on every question type in
+ * the group. What follows is only the page's wording and grouping: which measures it offers, under what name, about
+ * which subject (`brand`: the brand chosen, or the row's brand or company; `you`: the tracker; `rival`: each
+ * question's own named rival; `ai`: the answer itself) and with what one-line explanation.
+ */
+export interface DataMeasure {
+  /** The page's id (a settings key: a table names its numbers by it). */
+  id: string;
+  /** The measure in the book. */
+  measure: string;
+  subject: "brand" | "you" | "rival" | "ai";
+  /** Reads an argument (the argument chosen, or the row's argument). */
+  arg?: boolean;
+  label: string;
+  group: string;
+  /** What it counts and out of what, in plain words. */
+  tip: string;
+  /** Offered only on these groups - wording, not legality: the same count is offered elsewhere under its general
+   * name ("Sticks with you" is "Picked" for you, said the Habit card's way). */
+  only?: readonly DataPoolKey[];
+}
+
+const dm = (id: string, measure: string, subject: DataMeasure["subject"], group: string, label: string, tip: string, arg?: boolean, only?: DataPoolKey[]): DataMeasure => ({
+  id,
+  measure,
+  subject,
+  group,
+  label,
+  tip,
+  ...(arg ? { arg } : {}),
+  ...(only ? { only } : {}),
+});
+
+export const DATA_MEASURES: readonly DataMeasure[] = [
+  dm("named", "named", "brand", "Brand", "Named", "Answers that name the brand, out of every answer."),
+  dm("recommended", "recommended", "brand", "Brand", "Recommended", "Answers that recommend the brand (the pick counts as a recommendation), out of every answer."),
+  dm("picked", "picked", "brand", "Brand", "Picked", "Answers whose one pick is the brand, out of every answer."),
+  dm("share_of_picks", "share_of_picks", "brand", "Brand", "Share of picks", "Of the answers where the AI picks one brand in analysis, the share that pick this brand."),
+  dm("converts", "converts", "brand", "Brand", "Recommendations that end as the pick", "Of the answers that recommend the brand, the share that pick it."),
+  dm("negative", "negative", "brand", "Brand", "Named negatively", "Of the answers that name the brand, the share that name it as one to avoid."),
+  dm("named_first", "named_first", "brand", "Brand", "Named first", "Of the answers that name the brand, the share that name it before any other brand in analysis."),
+  dm("named_instead", "named_instead", "brand", "Brand", "Recommended instead", "Answers that recommend the brand instead of yours, out of every answer."),
+  dm("sent_to", "sent_to", "brand", "Brand", "Named as where to go", "Answers that name the brand as where to go, out of every answer."),
+  dm("redirected_to", "redirected_to", "brand", "Brand", "Pointed to instead", "Answers that point your customer to the brand, out of every answer."),
+
+  dm("commit_rate", "commit_rate", "ai", "The pick", "Picks one brand", "Answers that pick one brand in analysis, out of every answer."),
+  dm("picks_outside_analysis", "picks_outside_analysis", "ai", "The pick", "Picks a brand outside of analysis", "Answers whose pick is a brand you left out of analysis, out of every answer."),
+  dm("picks_outside_category", "picks_outside_category", "ai", "The pick", "Picks something outside the category", "Answers whose pick is outside the category, out of every answer."),
+  dm("outcome_conditional", "outcome_conditional", "ai", "The pick", "Gives conditions, no pick", "Answers that say which brand suits which buyer and pick none, out of every answer."),
+  dm("outcome_no_pick", "outcome_no_pick", "ai", "The pick", "Picks nothing", "Answers that pick nothing, out of every answer."),
+  dm("outcome_clarification", "outcome_clarification", "ai", "The pick", "Asks the buyer for more", "Answers that ask the buyer for more before picking, out of every answer."),
+
+  dm("h2h_you", "h2h_win", "you", "Head-to-head", "You win", "Answers whose pick is you, out of every answer."),
+  dm("h2h_rival", "h2h_win", "rival", "Head-to-head", "Rival wins", "Answers whose pick is the rival the question names, out of every answer."),
+  dm("h2h_another", "h2h_another", "ai", "Head-to-head", "Picks another brand", "Answers that pick something other than you and the named rival, out of every answer."),
+  dm("h2h_no_pick", "h2h_no_pick", "ai", "Head-to-head", "No single pick", "Answers that pick nothing, out of every answer."),
+  dm("h2h_two_way", "h2h_two_way", "you", "Head-to-head", "Two-way record", "Of the answers that pick you or the named rival, the share that pick you."),
+
+  dm("habit_stick", "picked", "you", "Habit", "Sticks with you", "Answers whose pick is you, out of every answer.", false, ["habit"]),
+  dm("habit_switch", "picks_other", "ai", "Habit", "Picks something else", "Answers that pick something other than you, in the category or not, out of every answer.", false, ["habit"]),
+
+  dm("tier_premium", "tier_premium", "ai", "Premium vs basic", "Sides with premium", "Answers that side with the premium end, out of every answer."),
+  dm("tier_basic", "tier_basic", "ai", "Premium vs basic", "Sides with basic", "Answers that side with the basic end, out of every answer."),
+  dm("tier_balanced", "tier_balanced", "ai", "Premium vs basic", "Balanced", "Answers that weigh both ends, out of every answer."),
+  dm("tier_none", "tier_none", "ai", "Premium vs basic", "Takes no side", "Answers that take no stance on the two ends, out of every answer."),
+
+  dm("worth_yes", "worth_yes", "ai", "Value", "Worth it", "Answers that call your line worth its price over a cheaper option, out of every answer."),
+  dm("worth_depends", "worth_depends", "ai", "Value", "It depends", "Answers that say it depends, out of every answer."),
+  dm("worth_no", "worth_no", "ai", "Value", "Not worth it", "Answers that call your line not worth its price, out of every answer."),
+  dm("instead_rival", "instead_rival", "ai", "Value", "Points to a rival", "Answers that recommend a rival instead, out of every answer."),
+  dm("instead_own", "instead_own", "ai", "Value", "Points only to your own cheaper option", "Answers whose only cheaper suggestion is one of your own, out of every answer."),
+  dm("instead_nowhere", "instead_nowhere", "ai", "Value", "Points nowhere", "Answers that suggest no cheaper option at all, out of every answer."),
+
+  dm("go_ahead", "go_ahead", "ai", "Buyers' worries", "Go ahead", "Answers that tell the worried buyer to go ahead, out of every answer."),
+  dm("steer_clear", "steer_clear", "ai", "Buyers' worries", "Steer clear", "Answers that tell the worried buyer to steer clear, out of every answer."),
+  dm("buyer_no_side", "buyer_no_side", "ai", "Buyers' worries", "No side", "Answers that take no side, out of every answer."),
+  dm("stay", "stay", "ai", "Stay or leave", "Stay", "Answers that tell the customer to stay, out of every answer."),
+  dm("leave", "leave", "ai", "Stay or leave", "Leave", "Answers that tell the customer to leave, out of every answer."),
+  dm("customer_no_side", "customer_no_side", "ai", "Stay or leave", "No side", "Answers that take no side, out of every answer."),
+  dm("agrees", "agrees", "ai", "The worry", "Agrees the worry is fair", "Of the answers that agree, partly agree or disagree with the worry, the share that agree."),
+  dm("partly_agrees", "partly_agrees", "ai", "The worry", "Partly agrees", "Of the answers that agree, partly agree or disagree with the worry, the share that partly agree."),
+  dm("disagrees", "disagrees", "ai", "The worry", "Says the worry is wrong", "Of the answers that agree, partly agree or disagree with the worry, the share that disagree."),
+  dm("sent_to_any", "sent_to_any", "ai", "Where it sends them", "Names another brand to go to", "Answers that name another brand in analysis as where to go, out of every answer."),
+  dm("sent_own", "sent_own", "ai", "Where it sends them", "Offers your own other product", "Answers that offer another of your own products as the way out, out of every answer."),
+
+  dm("routed_category", "routed_category", "ai", "Spotting the problem", "Points to the category", "Answers that point the asker to your category, out of every answer."),
+  dm("routed_adjacent", "routed_adjacent", "ai", "Spotting the problem", "Points outside the category", "Answers that point the asker to another kind of solution, out of every answer."),
+  dm("routed_none", "routed_none", "ai", "Spotting the problem", "Points nowhere", "Answers that explain without pointing anywhere, out of every answer."),
+
+  dm("relationship_strengthens", "relationship_strengthens", "ai", "Relationship", "Strengthens", "Answers that strengthen the customer relationship, out of every answer."),
+  dm("relationship_neutral", "relationship_neutral", "ai", "Relationship", "Neutral", "Answers that leave the relationship where it is, out of every answer."),
+  dm("relationship_weakens", "relationship_weakens", "ai", "Relationship", "Weakens", "Answers that weaken the relationship, out of every answer."),
+  dm("redirected_any", "redirected_any", "ai", "Relationship", "Points to another brand", "Answers that point your customer to another brand in analysis, out of every answer."),
+  dm("case_strong", "case_strong", "ai", "Case strength", "A strong case", "Answers that make a strong case for you, out of every answer."),
+  dm("case_hedged", "case_hedged", "ai", "Case strength", "A hedged case", "Business cases that hedge, out of every answer."),
+  dm("case_undermined", "case_undermined", "ai", "Case strength", "Argues against you", "Business cases the answer argues against, out of every answer."),
+  dm("case_partial", "case_partial", "ai", "Case strength", "A partial answer", "Answers to a critic that make only part of the case, out of every answer."),
+  dm("case_concedes", "case_concedes", "ai", "Case strength", "Drops your side", "Answers to a critic that drop your side, out of every answer."),
+  dm("growth_backs", "growth_backs", "ai", "Expansion", "Backs it", "Answers that back doing more with you, out of every answer."),
+  dm("growth_neutral", "growth_neutral", "ai", "Expansion", "Neither backs nor discourages", "Answers that neither back nor discourage it, out of every answer."),
+  dm("growth_redirects", "growth_redirects", "ai", "Expansion", "Points them elsewhere", "Answers that point them elsewhere, out of every answer."),
+
+  dm("argues", "argues", "ai", "Arguments", "Argues it", "Answers that make the argument, out of every answer.", true),
+  dm("argues_when_picked", "argues_when_picked", "brand", "Arguments", "Argues it, when the brand is the pick", "Of the answers that pick the brand, the share that make the argument.", true),
+  dm("argues_when_other_picked", "argues_when_other_picked", "brand", "Arguments", "Argues it, when another brand is the pick", "Of the answers that pick another brand in analysis, the share that make the argument.", true),
+];
+
+export const DATA_MEASURE_BY_ID: ReadonlyMap<string, DataMeasure> = new Map(DATA_MEASURES.map((m) => [m.id, m]));
+
+/** The Data page's groups of questions, in journey order: one group per kind of question, never two kinds pooled
+ * (ruling 7: What to buy is a buyer's question and a question about one job; What's popular and Premium vs basic
+ * are their own groups; the customers' worries pool the two stages they are asked at, as their card does). */
+export type DataPoolKey =
+  | "problem"
+  | "learning"
+  | "what_to_buy"
+  | "popular"
+  | "criteria"
+  | "premium"
+  | "h2h"
+  | "h2h_class"
+  | "switching"
+  | "buyers_worries"
+  | "value"
+  | "customers_worries"
+  | "looking_around"
+  | "habit"
+  | "business_case"
+  | "expansion"
+  | "ecosystem"
+  | "advocacy";
+
+export interface DataPool {
+  key: DataPoolKey;
+  types: readonly QuestionType[];
+  /** The journey stage it sits in (views.ts StationKey). */
+  station: "awareness" | "consideration" | "comparison" | "doubts" | "value" | "customer_base";
+}
+
+export const DATA_POOLS: readonly DataPool[] = [
+  { key: "problem", types: ["problem_recognition"], station: "awareness" },
+  { key: "learning", types: ["category_education"], station: "awareness" },
+  { key: "what_to_buy", types: ["discovery", "use_case"], station: "consideration" },
+  { key: "popular", types: ["social_validation"], station: "consideration" },
+  { key: "criteria", types: ["criteria"], station: "consideration" },
+  { key: "premium", types: ["premium_worth"], station: "consideration" },
+  { key: "h2h", types: ["comparison_entity"], station: "comparison" },
+  { key: "h2h_class", types: ["comparison_class"], station: "comparison" },
+  { key: "switching", types: ["switching"], station: "comparison" },
+  { key: "buyers_worries", types: ["objections"], station: "doubts" },
+  { key: "value", types: ["pricing"], station: "value" },
+  { key: "customers_worries", types: ["churn_triggers", "renewal"], station: "customer_base" },
+  { key: "looking_around", types: ["looking_around"], station: "customer_base" },
+  { key: "habit", types: ["repertoire"], station: "customer_base" },
+  { key: "business_case", types: ["business_case"], station: "customer_base" },
+  { key: "expansion", types: ["expansion"], station: "customer_base" },
+  { key: "ecosystem", types: ["ecosystem"], station: "customer_base" },
+  { key: "advocacy", types: ["advocacy"], station: "customer_base" },
+];
+export const DATA_POOL_BY_KEY: ReadonlyMap<DataPoolKey, DataPool> = new Map(DATA_POOLS.map((p) => [p.key, p]));
+
+/** The Data page group a question type sits in. */
+export function dataPoolOf(type: QuestionType): DataPoolKey | null {
+  return DATA_POOLS.find((p) => p.types.includes(type))?.key ?? null;
+}
+
+/** Why a Data page number cannot be read on a group of questions (its measure is not legal on every type in it);
+ * null = legal. */
+export function dataIllegal(m: DataMeasure, pool: DataPoolKey): string | null {
+  const p = DATA_POOL_BY_KEY.get(pool);
+  const measure = MEASURE_BY_ID.get(m.measure);
+  if (!p || !measure || (m.only && !m.only.includes(pool))) return "not asked by these questions";
+  return p.types.every((t) => measure.legal.includes(t)) ? null : "not asked by these questions";
+}

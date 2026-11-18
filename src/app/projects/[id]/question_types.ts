@@ -1,39 +1,39 @@
-import { POOLS, POOL_LABEL as ENGINE_POOL_LABEL } from "@/lib/engine/measures";
+import { DATA_POOLS, dataPoolOf, type DataPoolKey } from "@/lib/engine/facts/measure_book";
+import { questionTypeOf as factQuestionType } from "@/lib/engine/facts/basics";
 import { ROW_NAME } from "@/lib/engine/question_names";
-import { viewsOf, type ViewKey } from "@/lib/engine/views";
 
 /**
- * The dashboard's names for question types (2026-11-11): one place for the
- * labels Build a table and Prompt health show, matching the Map's row names.
- * The engine's contract names stay in measures.ts (POOLS) and are the
- * fallback for any type without an override here.
+ * The dashboard's names for groups of questions (2026-11-11; on the fact layer's groups since 2026-11-17, step 6):
+ * one place for the labels Build a table, search and the question check show, matching the Map's row names
+ * (question_names.ts). The groups are the measure book's (facts/measure_book.ts DATA_POOLS) - ruling 7: What to buy
+ * is a buyer's question and a question about one job; What's popular and Premium vs basic are their own groups.
  */
-export const QUESTION_TYPE_LABEL: Record<ViewKey, string> = {
-  ...ENGINE_POOL_LABEL,
-  // The Map's own row names (question_names.ts, one list since 2026-11-12),
-  // so a pool reads the same in Build a table, search and the question check
-  // as on the Map. Settled-customer pools keep their own specific names.
-  headline: ROW_NAME.open,
-  awareness_routing: ROW_NAME.awareness,
-  awareness_explainer: ROW_NAME.explainer,
-  criteria_taught: ROW_NAME.criteria,
-  premium_tier: ROW_NAME.premium,
-  head_to_head_entity: ROW_NAME.h2h,
-  offensive_capture: ROW_NAME.leavers,
-  doubt: ROW_NAME.buyers,
+export const QUESTION_TYPE_LABEL: Record<DataPoolKey, string> = {
+  problem: ROW_NAME.awareness,
+  learning: ROW_NAME.explainer,
+  what_to_buy: ROW_NAME.open,
+  popular: ROW_NAME.social,
+  criteria: ROW_NAME.criteria,
+  premium: ROW_NAME.premium,
+  h2h: ROW_NAME.h2h,
+  h2h_class: "Head-to-head - classes",
+  switching: ROW_NAME.leavers,
+  buyers_worries: ROW_NAME.buyers,
   value: ROW_NAME.value,
-  keep_or_leave: ROW_NAME.customers,
-  defensive_hold: ROW_NAME.hold,
-  repertoire: ROW_NAME.repertoire,
+  customers_worries: ROW_NAME.customers,
+  looking_around: ROW_NAME.hold,
+  habit: ROW_NAME.repertoire,
+  business_case: "Business case",
+  expansion: "Expansion",
+  ecosystem: "What to use alongside you",
+  advocacy: "Answering a critic",
 };
 
-/** Question types in journey order. */
-export const QUESTION_TYPE_ORDER: readonly ViewKey[] = POOLS.map((p) => p.key);
+/** Groups in journey order. */
+export const QUESTION_TYPE_ORDER: readonly DataPoolKey[] = DATA_POOLS.map((p) => p.key);
 
-/** A cell's question type: its view (views.ts). Premium vs basic counts in
- * the headline too, but it reads as its own type. null = a retired stage. */
-export function questionTypeOf(stage: string, angle: string | null | undefined): ViewKey | null {
-  const views = viewsOf(stage, angle);
-  if (views.includes("premium_tier")) return "premium_tier";
-  return views[0] ?? null;
+/** A cell's group of questions. null = a retired stage. */
+export function questionTypeOf(stage: string, angle: string | null | undefined): DataPoolKey | null {
+  const t = factQuestionType(stage, angle);
+  return t ? dataPoolOf(t) : null;
 }

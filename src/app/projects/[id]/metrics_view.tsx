@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ViewKey } from "@/lib/engine/views";
-import type { WorkbenchView } from "@/lib/engine/workbench";
-import { MEASURES, illegalReason, legalPools, type MeasureDef } from "@/lib/engine/measures";
-import { STATION_LABEL, STATION_OF } from "@/lib/engine/views";
+import type { WorkbenchView } from "@/lib/engine/workbench_rows";
+import { DATA_POOL_BY_KEY, type DataPoolKey } from "@/lib/engine/facts/measure_book";
+import { STATION_LABEL } from "@/lib/engine/views";
 import EvidencePanel, { type EvidenceRequest } from "./evidence_panel";
 import { SortTable, downloadCsv, downloadXlsx, sortRows, type Col, type SortState } from "./table";
 import { QUESTION_TYPE_LABEL, QUESTION_TYPE_ORDER } from "./question_types";
@@ -13,6 +12,10 @@ import { Choice, Segments } from "./pivot_controls";
 import {
   DIMS,
   DIM_LABEL,
+  MEASURES,
+  illegalReason,
+  legalPools,
+  type MeasureDef,
   DIM_NOUN,
   MAX_MEASURES,
   THIN,
@@ -56,8 +59,9 @@ import { T } from "./type_scale";
  *
  * - Questions (the pool), one measure - or up to four side by side when
  *   Columns is None - Rows, Columns, and the brand / argument a measure
- *   reads. Legality lives in engine/measures.ts alone (pivot_compute.ts
- *   resolves): measures and dimensions the pool does not ask are hidden.
+ *   reads. Legality is the measure book's alone (engine/facts/measure_book.ts;
+ *   pivot_compute.ts resolves): measures and dimensions the questions do not
+ *   ask are hidden. Every cell is a fact and prints by its measure's rule.
  * - Show as: Table | Bars | Dots. Lines is not offered until three waves
  *   exist (hidden, not greyed - 2026-11-16).
  * - Waves: This wave | Wave over wave - the same table computed on the
@@ -237,7 +241,7 @@ export function PivotTable({
       const thin = a.n < THIN;
       const body = (
         <span className={`inline-flex items-center leading-tight ${thin ? "opacity-50" : ""}`} title={rangeTip(a)}>
-          {pct(a.k / a.n)}
+          {a.text}
           {thin && <span className="ml-0.5 align-super text-[10px] text-ink-3">*</span>}
         </span>
       );
@@ -398,7 +402,7 @@ export function PivotTable({
   const poolChoices = QUESTION_TYPE_ORDER.map((k) => ({
     value: k,
     label: POOL_LABEL[k],
-    group: STATION_LABEL[STATION_OF[k]],
+    group: STATION_LABEL[DATA_POOL_BY_KEY.get(k)!.station],
     disabled: present.includes(k) ? null : "this tracker does not ask these questions",
   }));
   const where = res.where;
@@ -521,7 +525,7 @@ export function PivotTable({
             tip="Each kind of question the AI was asked. Numbers are only ever read inside one kind."
             value={pool}
             options={poolChoices}
-            onChange={(v) => change({ pool: v as ViewKey })}
+            onChange={(v) => change({ pool: v as DataPoolKey })}
             width="min-w-[12rem]"
           />
           <Choice

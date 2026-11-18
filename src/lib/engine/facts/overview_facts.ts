@@ -375,8 +375,14 @@ function doubtView<V extends string>(data: ViewData, rf: RunFacts, kind: "object
     if (!seen.has(k)) seen.set(k, { stage: it.stage, concern: it.concern, seq: it.seq });
   }
   const rows: WorryRow<V>[] = [];
+  // Each row on its card's own scope (the Map's rule, analysis_map.ts): a customers' worry asked at one stage only
+  // is ONE card pooling both stages for that worry, so its row is that card's scope - same answers, same fact id; a
+  // worry asked at both stages is one card per stage.
+  const stagesOf = new Map<string, number>();
+  const wkey = (c: string) => c.trim().toLowerCase();
+  for (const w of seen.values()) if (has(rf, { types: [w.stage as QuestionType], worry: w.concern })) stagesOf.set(wkey(w.concern), (stagesOf.get(wkey(w.concern)) ?? 0) + 1);
   for (const [k, w] of seen) {
-    const sc: Scope = { types: [w.stage as QuestionType], worry: w.concern };
+    const sc: Scope = types.length > 1 && (stagesOf.get(wkey(w.concern)) ?? 0) < 2 ? { types, worry: w.concern } : { types: [w.stage as QuestionType], worry: w.concern };
     if (!has(rf, sc)) continue;
     rows.push({
       key: k,

@@ -1,8 +1,8 @@
-import type { WorkbenchView } from "@/lib/engine/workbench";
-import { MEASURES, illegalReason, type MeasureDef } from "@/lib/engine/measures";
-import { STATION_LABEL, STATION_OF, type ViewKey } from "@/lib/engine/views";
+import type { WorkbenchView } from "@/lib/engine/workbench_rows";
+import { DATA_POOL_BY_KEY, type DataPoolKey } from "@/lib/engine/facts/measure_book";
+import { STATION_LABEL } from "@/lib/engine/views";
 import { QUESTION_TYPE_LABEL } from "./question_types";
-import { DIM_NOUN, mLabel, mTip, presentPools, resolveSettings, type DimKey, type PivotSettings } from "./pivot_compute";
+import { DIM_NOUN, MEASURES, illegalReason, mLabel, mTip, presentPools, resolveSettings, type DimKey, type MeasureDef, type PivotSettings } from "./pivot_compute";
 import { LIBRARY, LIB_BY_ID, entryAvailable, type LibEntry } from "./table_library";
 import { MODE_LABEL, TIER_LABEL } from "./view_parts";
 
@@ -93,50 +93,54 @@ function stem(w: string): string {
 }
 
 /** Journey and everyday words -> the question types they mean. */
-const POOL_WORDS: [string[], ViewKey[]][] = [
-  [["awareness", "aware", "problem", "pain", "learn", "learning", "education", "explain", "new to", "category", "first heard", "discover", "discovery"], ["awareness_routing", "awareness_explainer"]],
-  [["consideration", "consider", "open choice", "what to buy", "which to get", "which should", "shortlist", "choose", "choice", "pick", "recommend", "buy", "buying", "purchase"], ["headline"]],
-  [["consideration", "criteria", "what matters", "factors", "look for", "checklist", "requirements"], ["criteria_taught"]],
-  [["consideration", "premium", "basic", "tier", "luxury", "high end", "budget", "upmarket"], ["premium_tier"]],
-  [["comparison", "compare", "versus", "vs", "head to head", "rival", "competitor", "competition", "matchup", "battle", "against"], ["head_to_head_entity", "head_to_head_class"]],
-  [["switching", "switch", "leaver", "leaving", "defect", "steal", "win over", "conquest", "move to", "poach"], ["offensive_capture", "defensive_hold"]],
-  [["doubts", "doubt", "worry", "worries", "concern", "objection", "fear", "hesitation", "risk", "complaint", "downside"], ["doubt", "keep_or_leave"]],
+const POOL_WORDS: [string[], DataPoolKey[]][] = [
+  [["awareness", "aware", "problem", "pain", "learn", "learning", "education", "explain", "new to", "category", "first heard", "discover", "discovery"], ["problem", "learning"]],
+  [["consideration", "consider", "open choice", "what to buy", "which to get", "which should", "shortlist", "choose", "choice", "pick", "recommend", "buy", "buying", "purchase"], ["what_to_buy"]],
+  [["consideration", "popular", "popularity", "best known", "most used", "everyone uses", "social proof", "reputation", "trusted"], ["popular"]],
+  [["consideration", "criteria", "what matters", "factors", "look for", "checklist", "requirements"], ["criteria"]],
+  [["consideration", "premium", "basic", "tier", "luxury", "high end", "budget", "upmarket"], ["premium"]],
+  [["comparison", "compare", "versus", "vs", "head to head", "rival", "competitor", "competition", "matchup", "battle", "against"], ["h2h", "h2h_class"]],
+  [["switching", "switch", "leaver", "leaving", "defect", "steal", "win over", "conquest", "move to", "poach"], ["switching", "looking_around"]],
+  [["doubts", "doubt", "worry", "worries", "concern", "objection", "fear", "hesitation", "risk", "complaint", "downside"], ["buyers_worries", "customers_worries"]],
   [["value", "price", "pricing", "cost", "expensive", "cheap", "cheaper", "worth", "worth it", "fee", "afford", "money", "budget"], ["value"]],
-  [["loyalty", "loyal", "retention", "retain", "churn", "stay", "leave", "keep", "cancel", "renew", "renewal", "customers", "customer base", "existing customer"], ["keep_or_leave", "defensive_hold", "repertoire"]],
-  [["habit", "repertoire", "repeat", "routine", "stick with", "regular"], ["repertoire"]],
-  [["answering a critic", "critic", "critics", "criticism", "advocacy", "advocate", "word of mouth", "refer", "referral", "defend", "recommend to"], ["settled_advocacy"]],
-  [["business case", "approval", "approve", "sign off", "boss", "justify", "roi"], ["settled_business_case"]],
-  [["expansion", "expand", "grow", "growth", "upgrade", "upsell", "more seats"], ["settled_expansion"]],
-  [["what to use alongside", "alongside", "use with", "pair with", "ecosystem", "integration", "add on", "companion", "accessory", "partner"], ["settled_ecosystem"]],
+  [["loyalty", "loyal", "retention", "retain", "churn", "stay", "leave", "keep", "cancel", "renew", "renewal", "customers", "customer base", "existing customer"], ["customers_worries", "looking_around", "habit"]],
+  [["habit", "repertoire", "repeat", "routine", "stick with", "regular"], ["habit"]],
+  [["answering a critic", "critic", "critics", "criticism", "advocacy", "advocate", "word of mouth", "refer", "referral", "defend", "recommend to"], ["advocacy"]],
+  [["business case", "approval", "approve", "sign off", "boss", "justify", "roi"], ["business_case"]],
+  [["expansion", "expand", "grow", "growth", "upgrade", "upsell", "more seats"], ["expansion"]],
+  [["what to use alongside", "alongside", "use with", "pair with", "ecosystem", "integration", "add on", "companion", "accessory", "partner"], ["ecosystem"]],
 ];
 
 /** Everyday words for the numbers, by measure id. */
 const MEASURE_WORDS: Record<string, string[]> = {
-  mentioned: ["named", "mention", "mentioned", "visibility", "visible", "presence", "appear", "awareness", "share of voice"],
+  named: ["named", "mention", "mentioned", "visibility", "visible", "presence", "appear", "awareness", "share of voice"],
   recommended: ["recommend", "recommended", "endorse", "suggest", "shortlist"],
-  chosen: ["picked", "pick", "chosen", "choose", "winner", "win", "top pick", "selected"],
-  share_of_decided: ["picked", "share of picks", "pick share", "market share", "win rate", "winner"],
+  picked: ["picked", "pick", "chosen", "choose", "winner", "win", "top pick", "selected"],
+  share_of_picks: ["picked", "share of picks", "pick share", "market share", "win rate", "winner"],
   negative: ["negative", "criticized", "criticism", "bad", "complaint"],
   named_first: ["first", "top of mind", "named first", "first mention"],
-  firm_pick: ["decisive", "commits", "firm"],
-  conditional: ["it depends", "rules", "hedge", "hedging"],
-  no_pick: ["no pick", "undecided"],
-  out_of_category: ["outside", "leak", "other category"],
+  commit_rate: ["decisive", "commits", "firm"],
+  outcome_conditional: ["it depends", "rules", "hedge", "hedging"],
+  outcome_no_pick: ["no pick", "undecided"],
+  picks_outside_category: ["outside", "leak", "other category"],
+  picks_outside_analysis: ["outside of analysis", "left out", "not tracked"],
   h2h_you: ["win", "wins", "beat", "head to head"],
   h2h_rival: ["lose", "loses", "rival wins"],
   h2h_two_way: ["record", "win rate"],
   worth_yes: ["worth it", "value", "price"],
   worth_no: ["not worth", "overpriced", "too expensive"],
-  proceed: ["go ahead", "reassure"],
-  avoid: ["avoid", "steer away"],
-  keep: ["stay", "keep", "retain", "loyalty"],
+  go_ahead: ["go ahead", "reassure"],
+  steer_clear: ["avoid", "steer away", "steer clear"],
+  stay: ["stay", "keep", "retain", "loyalty"],
   leave: ["leave", "churn", "cancel"],
-  premise_confirms: ["agrees", "confirms the worry"],
-  premise_rebuts: ["pushes back", "rebuts", "defends"],
+  agrees: ["agrees", "confirms the worry", "fair"],
+  disagrees: ["pushes back", "rebuts", "defends"],
+  instead_rival: ["cheaper rival", "instead", "alternative"],
+  instead_own: ["own cheaper", "trade down", "lower tier"],
   argues: ["argument", "reason", "why"],
   routed_category: ["routes to the category"],
-  rep_stick: ["sticks", "loyal", "habit"],
-  rep_switch: ["switch", "switches"],
+  habit_stick: ["sticks", "loyal", "habit"],
+  habit_switch: ["switch", "switches"],
 };
 
 const ASSISTANT_WORDS: Record<string, string[]> = {
@@ -163,13 +167,13 @@ function guessedForms(name: string): string[] {
 }
 
 /** The row to open a question type's own table on. */
-function bestRow(data: WorkbenchView, pool: ViewKey): DimKey {
+function bestRow(data: WorkbenchView, pool: DataPoolKey): DimKey {
   const tryRows: DimKey[] =
-    pool === "doubt" || pool === "keep_or_leave"
+    pool === "buyers_worries" || pool === "customers_worries"
       ? ["worry", "room", "engine"]
-      : pool.startsWith("head_to_head") || pool === "offensive_capture" || pool === "defensive_hold"
+      : pool.startsWith("h2h") || pool === "switching" || pool === "looking_around"
         ? ["rival", "room", "engine"]
-        : pool === "headline"
+        : pool === "what_to_buy" || pool === "popular"
           ? ["brand", "room"]
           : ["room", "engine"];
   for (const row of tryRows) {
@@ -179,7 +183,7 @@ function bestRow(data: WorkbenchView, pool: ViewKey): DimKey {
   return "none";
 }
 
-const custom = (title: string, settings: Partial<PivotSettings> & { pool: ViewKey }, focus?: Focus): SearchOpen => ({
+const custom = (title: string, settings: Partial<PivotSettings> & { pool: DataPoolKey }, focus?: Focus): SearchOpen => ({
   title,
   settings: { measures: [], row: "none", col: "none", brand: null, arg: null, where: null, ...settings },
   focus,
@@ -222,14 +226,14 @@ export function buildSearchIndex(data: WorkbenchView | null, brandName: string, 
   if (!data?.facts) return out;
 
   const present = presentPools(data);
-  const has = (p: ViewKey) => present.includes(p);
+  const has = (p: DataPoolKey) => present.includes(p);
   const listed = data.brands.map((b, i) => ({ b, i })).filter(({ b }) => b.listed);
-  const rivalIdx = new Set(data.prompts.filter((p) => p.rival >= 0).map((p) => p.rival));
+  const rivalIdx = new Set(data.prompts.filter((p) => p.rival >= 0 && (p.pool === "h2h" || p.pool === "h2h_class" || p.pool === "switching")).map((p) => p.rival));
 
   // Question types (and the journey stage each sits in).
   for (const pool of present) {
     const label = QUESTION_TYPE_LABEL[pool];
-    const station = STATION_LABEL[STATION_OF[pool]];
+    const station = STATION_LABEL[DATA_POOL_BY_KEY.get(pool)!.station];
     const row = bestRow(data, pool);
     add({
       id: `q:${pool}`,
@@ -260,7 +264,7 @@ export function buildSearchIndex(data: WorkbenchView | null, brandName: string, 
       kind: "brand",
       title: `${b.name} in each buying situation`,
       desc: `How often ${b.name} is named, recommended and picked, buying situation by buying situation.`,
-      open: custom(`${b.name} in each buying situation`, { pool: "headline", measures: ["mentioned", "recommended", "share_of_decided"], row: "room", brand: you ? null : b.name }),
+      open: custom(`${b.name} in each buying situation`, { pool: "what_to_buy", measures: ["named", "recommended", "share_of_picks"], row: "room", brand: you ? null : b.name }),
       names: [b.name, ...shortForms(b.name, b.aliases)],
       words: [],
     });
@@ -269,23 +273,15 @@ export function buildSearchIndex(data: WorkbenchView | null, brandName: string, 
       kind: "brand",
       title: `${b.name} on each assistant`,
       desc: `How often ${b.name} is named, recommended and picked on each AI assistant.`,
-      open: custom(`${b.name} on each assistant`, { pool: "headline", measures: ["mentioned", "recommended", "chosen"], row: "engine", brand: you ? null : b.name }),
+      open: custom(`${b.name} on each assistant`, { pool: "what_to_buy", measures: ["named", "recommended", "picked"], row: "engine", brand: you ? null : b.name }),
       names: [b.name, ...shortForms(b.name, b.aliases)],
       words: [],
     });
   }
 
   // Rivals (the brands asked about head-to-head, and named classes).
-  const rivalNames = [
-    ...[...rivalIdx].map((i) => data.brands[i].name),
-    // Rivals named only by their setup wording (no brand resolved), as the
-    // table's rows name them.
-    ...new Set(
-      data.prompts
-        .filter((p) => p.rival < 0 && p.angle >= 0 && !/^(defensive|offensive|generic|class)$/i.test(data.angles[p.angle]))
-        .map((p) => data.angles[p.angle].replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()))
-    ),
-  ];
+  // The rival each head-to-head or switching question names (its table's rows name it the same way).
+  const rivalNames = [...new Set([...rivalIdx].map((i) => data.brands[i].name))];
   for (const name of rivalNames) {
     add({
       id: `r:${name}`,
@@ -314,7 +310,7 @@ export function buildSearchIndex(data: WorkbenchView | null, brandName: string, 
       kind: "buyer",
       title: `Who gets picked - ${room}`,
       desc: `Share of picks for every brand, only when the buyer is "${room}".`,
-      open: custom(`Who gets picked - ${room}`, { pool: "headline", measures: ["share_of_decided"], row: "brand", where: { dim: "room", label: room } }),
+      open: custom(`Who gets picked - ${room}`, { pool: "what_to_buy", measures: ["share_of_picks"], row: "brand", where: { dim: "room", label: room } }),
       names: [room],
       words: ["buyer", "segment", "situation", "persona", "audience"],
     });
@@ -342,8 +338,8 @@ export function buildSearchIndex(data: WorkbenchView | null, brandName: string, 
 
   // Worries: each where it is asked (buyers before buying, customers after).
   data.worries.forEach((w, wi) => {
-    const views = new Set(data.prompts.filter((p) => p.worry === wi).flatMap((p) => p.views));
-    if (views.has("doubt")) {
+    const views = new Set(data.prompts.filter((p) => p.worry === wi).map((p) => p.pool));
+    if (views.has("buyers_worries")) {
       add({
         id: `wb:${wi}`,
         kind: "worry",
@@ -354,7 +350,7 @@ export function buildSearchIndex(data: WorkbenchView | null, brandName: string, 
         words: ["worry", "doubt", "objection", "concern", "buyer"],
       });
     }
-    if (views.has("keep_or_leave")) {
+    if (views.has("customers_worries")) {
       add({
         id: `wc:${wi}`,
         kind: "worry",
@@ -377,7 +373,7 @@ export function buildSearchIndex(data: WorkbenchView | null, brandName: string, 
       kind: "assistant",
       title: e.label,
       desc: `Who gets picked on ${e.label} alone, every brand.`,
-      open: custom(`Who gets picked on ${e.label}`, { pool: "headline", measures: ["mentioned", "recommended", "share_of_decided"], row: "brand", where: { dim: "engine", label: e.label } }),
+      open: custom(`Who gets picked on ${e.label}`, { pool: "what_to_buy", measures: ["named", "recommended", "share_of_picks"], row: "brand", where: { dim: "engine", label: e.label } }),
       names: [e.label],
       words: [v, ...(ASSISTANT_WORDS[norm(v)] ?? []), "assistant", "ai"],
     });
@@ -388,7 +384,7 @@ export function buildSearchIndex(data: WorkbenchView | null, brandName: string, 
       kind: "assistant",
       title: `All ${v} assistants`,
       desc: `Who gets picked across ${v}'s assistants, every brand.`,
-      open: custom(`Who gets picked on ${v}`, { pool: "headline", measures: ["mentioned", "recommended", "share_of_decided"], row: "brand", where: { dim: "vendor", label: v } }),
+      open: custom(`Who gets picked on ${v}`, { pool: "what_to_buy", measures: ["named", "recommended", "share_of_picks"], row: "brand", where: { dim: "vendor", label: v } }),
       names: [v],
       words: [...(ASSISTANT_WORDS[norm(v)] ?? []), "ai company", "vendor"],
     });
@@ -444,7 +440,7 @@ export function buildSearchIndex(data: WorkbenchView | null, brandName: string, 
 
   // Numbers (measures): each opened in the first question type that asks it.
   const seen = new Set<string>();
-  const poolOrder: ViewKey[] = has("headline") ? ["headline", ...present.filter((p) => p !== "headline")] : present;
+  const poolOrder: DataPoolKey[] = has("what_to_buy") ? ["what_to_buy", ...present.filter((p) => p !== "what_to_buy")] : present;
   for (const m of MEASURES) {
     const pool = poolOrder.find((p) => !illegalReason(m, p));
     if (!pool) continue;

@@ -185,7 +185,7 @@ async function block(
 ): Promise<AwarenessBlock | null> {
   const { rows: pool, uncoded, core } = poolOf(data, view, request);
   if (pool.length === 0 && uncoded === 0) return null;
-  const resolve = buildResolver(data.dictionary, data.judged);
+  const resolve = buildResolver(data.dictionary, data.judged, data.names);
   const targetKey = resolve(data.project.brand).key;
 
   const facts: Facts[] = pool.map((row) => {

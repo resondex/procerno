@@ -222,7 +222,7 @@ export function finishFields<T extends object>(o: T, fields: (keyof T)[]): T & {
 
 /* ------------------------------- parsing a fact id ------------------------------- */
 
-const SCOPE_TAG = /^(t|s|w|r|l|e|v|h)=/;
+const SCOPE_TAG = /^(t|s|w|r|l|e|v|k|m|i|h)=/;
 /** A fact id read back into its triple (fact.ts factId / scopeKey). */
 export function parseFactId(id: string): { measure: string; subject: string; scope: Scope } {
   const parts = id.split("|");
@@ -247,7 +247,7 @@ export function parseFactId(id: string): { measure: string; subject: string; sco
         scope.situation = v === "~none" ? null : v;
         break;
       case "w":
-        scope.worry = v;
+        scope.worry = v === "~none" ? null : v;
         break;
       case "r":
         scope.rival = v;
@@ -260,6 +260,15 @@ export function parseFactId(id: string): { measure: string; subject: string; sco
         break;
       case "v":
         scope.vendor = v;
+        break;
+      case "k":
+        scope.tier = v;
+        break;
+      case "m":
+        scope.mode = v;
+        break;
+      case "i":
+        scope.intent = v;
         break;
       case "h":
         scope.when = v;

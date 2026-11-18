@@ -7,7 +7,7 @@ import { PROMPT_HEALTH_MODEL } from "./models";
 import { promptsForRun } from "./surfaces";
 import { loadMatchupPromptsNotAsked } from "./matchups";
 import { healthChecks } from "./prompt_health_rule";
-import { buildResolver } from "./brand_resolve";
+import { buildResolver, writtenNames } from "./brand_resolve";
 import { cachedContextVerdicts } from "./context_judge";
 import { computeQuestionFit, type FitResult } from "./question_fit";
 import { logLegacyFlags, logWordingFlags } from "./prompt_flags";
@@ -157,7 +157,7 @@ export function buildHealthInput(
   }
 ): HealthInput {
   const { picked, skipped, stale } = selectPrompts(args);
-  const resolve = buildResolver(args.dictionary, args.judged);
+  const resolve = buildResolver(args.dictionary, args.judged, writtenNames(args.codes));
   const codeById = new Map(args.codes.map((c) => [c.response_id, c]));
   const byPrompt = rowsByPrompt(args.responses);
   const statusOf = (raw: string): { key: string; name: string; status: HealthStatus } => {

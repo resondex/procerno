@@ -245,7 +245,7 @@ export function parseCodeGroups(json: string | null | undefined, confirmed: Set<
  * same strict rule as poolOf: types asked across all buyers drop out. */
 export function computeReasons(data: ViewData, request: ViewRequest = {}): ReasonsView {
   const { project, dictionary } = data;
-  const resolve = buildResolver(dictionary, data.judged);
+  const resolve = buildResolver(dictionary, data.judged, data.names);
   const targetKey = resolve(project.brand).key;
   const pick = PICK(resolve, targetKey);
 

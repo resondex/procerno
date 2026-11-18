@@ -156,7 +156,7 @@ function sliceOf(key: string, label: string, rows: AnswerFacts[], targetKey: str
  * across all buyers and drop out of a filtered pool. */
 export function computeHeadline(data: ViewData, request: ViewRequest = {}): HeadlineView {
   const { run, project, source, dictionary } = data;
-  const resolve = buildResolver(dictionary, data.judged);
+  const resolve = buildResolver(dictionary, data.judged, data.names);
   const targetKey = resolve(project.brand).key;
   const legacy = new Set(project.competitors.map(matchKey));
   const { rows, uncoded, core } = poolOf(data, "headline", request);

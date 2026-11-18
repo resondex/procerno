@@ -89,7 +89,7 @@ function factsOf(c: AnswerCodes, resolve: Resolver): Facts {
 
 export function computePortfolio(data: ViewData, request: ViewRequest = {}): PortfolioView {
   const { run, project, source, dictionary } = data;
-  const resolve = buildResolver(dictionary, data.judged);
+  const resolve = buildResolver(dictionary, data.judged, data.names);
   const targetKey = resolve(project.brand).key;
   const { rows } = poolOf(data, "headline", request);
   const facts = rows.map(({ code }) => factsOf(code, resolve));

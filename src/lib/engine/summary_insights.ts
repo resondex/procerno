@@ -1827,8 +1827,10 @@ function worstWorry(inp: InsightInputs): Insight | null {
   const ok = k.rows.filter((r) => enough(r.verdicts.leave));
   if (ok.length === 0 || !inp.F) return null;
   const top = [...ok].sort((a, b) => rate(b.verdicts.leave) - rate(a.verdicts.leave) || a.concern.localeCompare(b.concern))[0];
-  // Every other customers' worry (another worry, or the same worry at the other stage), pooled as one fact.
-  const rest = inp.F.fact("leave", "ai", { types: ["churn_triggers", "renewal"], when: `!${worrySlice(top.concern)}|!stage:${top.stage}` });
+  // Every other customers' worry (another worry, or the same worry at the other stage), pooled as one fact - or,
+  // when there is exactly one other, that worry's own card fact (the same answers, the card's scope and id).
+  const others = k.rows.filter((r) => r !== top);
+  const rest = others.length === 1 ? others[0].verdicts.leave : inp.F.fact("leave", "ai", { types: ["churn_triggers", "renewal"], when: `!${worrySlice(top.concern)}|!stage:${top.stage}` });
   if (!enough(rest) || !apart(top.verdicts.leave, rest)) return null;
   const exit = top.topExits[0];
   const concern = top.concern || "this worry";

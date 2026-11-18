@@ -75,7 +75,7 @@ export interface CardSources {
  * over the headline pool, and each brand's argument lift (the summary's own
  * for the target, liftForBrand for the rest, computed once per key). */
 export function cardSourcesOf(data: ViewData, eng: ViewRequest, summary: BrandSummaryView, inputs: InsightInputs): { src: CardSources; byStage: Map<string, Map<string, number>> } {
-  const resolve = buildResolver(data.dictionary, data.judged);
+  const resolve = buildResolver(data.dictionary, data.judged, data.names);
   const byStage = new Map<string, Map<string, number>>();
   for (const { code, intent } of poolOf(data, "headline", eng).rows)
     if (code.outcome === "pick" && code.top_pick) {
@@ -185,7 +185,7 @@ export function brandHeadline(name: string, b: SummaryBrand): string {
  * Share of answers arguing each code when `key` is picked vs when another in-category brand is, over the headline pool
  * (brand_summary's lift, for any brand). */
 export function liftForBrand(data: ViewData, request: ViewRequest, key: string): { code: string; wins: RateCell; others: RateCell; lift: number }[] {
-  const resolve = buildResolver(data.dictionary, data.judged);
+  const resolve = buildResolver(data.dictionary, data.judged, data.names);
   const rows = poolOf(data, "headline", request).rows;
   const facts = rows.map(({ code }) => {
     let pick: string | null = null;

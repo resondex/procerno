@@ -1,16 +1,18 @@
-import type { ViewKey } from "@/lib/engine/views";
-import type { WorkbenchView } from "@/lib/engine/workbench";
+import type { WorkbenchView } from "@/lib/engine/workbench_rows";
+import { R, decodeFacts } from "@/lib/engine/workbench_rows";
+import type { AnswerFact } from "@/lib/engine/facts/answer_facts";
+import { factId, type Scope } from "@/lib/engine/facts/fact_id";
 import {
-  MEASURES,
+  DATA_MEASURES,
+  DATA_POOLS,
+  DATA_POOL_BY_KEY,
   MEASURE_BY_ID,
-  POOLS,
-  R,
-  illegalReason,
-  poolAsks,
+  dataIllegal,
+  printOf,
+  type DataMeasure,
+  type DataPoolKey,
   type MeasureCtx,
-  type MeasureDef,
-  type WbRow,
-} from "@/lib/engine/measures";
+} from "@/lib/engine/facts/measure_book";
 import { EVIDENCE_CAP } from "./evidence_panel";
 import { MODE_LABEL, TIER_LABEL } from "./view_parts";
 
@@ -21,10 +23,15 @@ import { MODE_LABEL, TIER_LABEL } from "./view_parts";
  * matches the two by label (`match`), never by index - index-based keys
  * (b3, e2) differ between runs.
  *
- * Legality stays in engine/measures.ts: a measure is read inside one pool,
- * and a measure or dimension the pool does not ask resolves away here (to
- * the pool's default measure, to "None"), so no table renders a number its
- * pool never asked.
+ * Fact layer step 6 (2026-11-17): the payload is the run's answer facts and
+ * every cell is a FACT - a measure from the one measure book
+ * (engine/facts/measure_book.ts), about a subject, in a scope - counted here
+ * with the measure's own base and numerator, and carrying its fact id (not
+ * drawn) so a check can recompute it on the server. A measure is read inside
+ * one group of questions and only where the book makes it legal on every
+ * question type in the group; a measure or dimension that is not legal
+ * resolves away here (to the group's default number, to "None"), so no table
+ * renders a number its questions never asked.
  *
  * Settings name the brand and the argument by NAME, not index, so the same
  * settings resolve on another run's payload.
@@ -78,43 +85,41 @@ export interface PivotWhere {
   label: string;
 }
 
-/** The measure a pool opens on. */
-export const POOL_DEFAULT: Partial<Record<ViewKey, string>> = {
-  headline: "chosen",
-  premium_tier: "tier_premium",
-  repertoire: "rep_stick",
-  head_to_head_entity: "h2h_you",
-  head_to_head_class: "h2h_you",
-  offensive_capture: "chosen",
-  defensive_hold: "keep",
+/** The number a group of questions opens on. */
+export const POOL_DEFAULT: Partial<Record<DataPoolKey, string>> = {
+  what_to_buy: "picked",
+  popular: "picked",
+  premium: "tier_premium",
+  habit: "habit_stick",
+  h2h: "h2h_you",
+  h2h_class: "h2h_you",
+  switching: "picked",
+  looking_around: "stay",
   value: "worth_yes",
-  criteria_taught: "argues",
-  awareness_routing: "routed_category",
-  awareness_explainer: "routed_category",
-  doubt: "proceed",
-  keep_or_leave: "keep",
-  settled_business_case: "rel_strengthens",
-  settled_expansion: "rel_strengthens",
-  settled_ecosystem: "rel_strengthens",
-  settled_advocacy: "rel_strengthens",
+  criteria: "argues",
+  problem: "routed_category",
+  learning: "routed_category",
+  buyers_worries: "go_ahead",
+  customers_worries: "stay",
+  business_case: "relationship_strengthens",
+  expansion: "relationship_strengthens",
+  ecosystem: "relationship_strengthens",
+  advocacy: "relationship_strengthens",
 };
 
-const MEASURE_LABEL: Record<string, string> = {
-  chosen: "Picked",
-  share_of_decided: "Share of picks",
-  negative: "Named negatively",
-  firm_pick: "Picks one",
-  premise_rebuts: "Pushes back",
-  exit_named: "Points to another brand",
-};
-export const mLabel = (m: MeasureDef) => MEASURE_LABEL[m.id] ?? m.label;
-/** Plain-word explanations for the measures whose engine tip is written in
- * method vocabulary; every other renamed measure keeps "engine name: tip". */
-const MEASURE_TIP: Record<string, string> = {
-  share_of_decided: "Of the answers where the AI commits to one product in the category, the share that pick this brand.",
-  chosen: "The share of all answers where this brand is the one product the AI picks.",
-};
-export const mTip = (m: MeasureDef) => MEASURE_TIP[m.id] ?? (MEASURE_LABEL[m.id] ? `${m.label}: ${m.tip}` : m.tip);
+/** A Data page number: a measure of the book, as the page offers it (`brand`: read for a brand, or the row's). */
+export type MeasureDef = DataMeasure & { brand: boolean };
+/** Every number the page offers, in picker order. */
+export const MEASURES: readonly MeasureDef[] = DATA_MEASURES.map((m) => ({ ...m, brand: m.subject === "brand" }));
+const DATA_BY_ID = new Map(MEASURES.map((m) => [m.id, m]));
+
+export const mLabel = (m: MeasureDef) => m.label;
+export const mTip = (m: MeasureDef) => m.tip;
+
+/** Why a number cannot be read on a group of questions (the book's legality); null = legal. */
+export const illegalReason = (m: MeasureDef, pool: DataPoolKey) => dataIllegal(m, pool);
+/** The groups a number can be read on, in journey order. */
+export const legalPools = (m: MeasureDef): DataPoolKey[] => DATA_POOLS.map((p) => p.key).filter((k) => !illegalReason(m, k));
 
 /** At most this many measures side by side (Columns = None only). */
 export const MAX_MEASURES = 4;
@@ -140,8 +145,8 @@ export const shortText = (t: string, cap: number) => (t.length > cap ? `${t.slic
 
 /** What the user (or a library entry) asked for. */
 export interface PivotSettings {
-  pool: ViewKey | null;
-  /** Measure ids; only the first is kept when Columns is a real dimension. */
+  pool: DataPoolKey | null;
+  /** Number ids (DATA_MEASURES); only the first is kept when Columns is a real dimension. */
   measures: string[];
   row: DimKey;
   col: DimKey;
@@ -160,7 +165,7 @@ export function sanitizeSettings(x: unknown): PivotSettings | null {
   const dim = (v: unknown): DimKey => (typeof v === "string" && DIM_KEYS.has(v) ? (v as DimKey) : "none");
   const w = o.where as Record<string, unknown> | null | undefined;
   return {
-    pool: typeof o.pool === "string" ? (o.pool as ViewKey) : null,
+    pool: typeof o.pool === "string" && DATA_POOL_BY_KEY.has(o.pool as DataPoolKey) ? (o.pool as DataPoolKey) : null,
     measures: Array.isArray(o.measures) ? o.measures.filter((m): m is string => typeof m === "string").slice(0, MAX_MEASURES) : [],
     row: dim(o.row),
     col: dim(o.col),
@@ -175,81 +180,82 @@ export function sanitizeSettings(x: unknown): PivotSettings | null {
 
 /** What the settings come to on one payload, after legality. */
 export interface Resolved {
-  pool: ViewKey;
+  pool: DataPoolKey;
   measures: MeasureDef[];
   rowDim: DimKey;
   colDim: DimKey;
   brand: number;
   arg: number;
-  /** The pools this payload carries, in journey order. */
-  present: ViewKey[];
-  poolRows: WbRow[];
+  /** The groups this payload carries, in journey order. */
+  present: DataPoolKey[];
+  /** The group's answers (the filter applied). */
+  poolRows: AnswerFact[];
   needsBrand: boolean;
   needsArg: boolean;
-  /** The filter, when legal for this pool; poolRows are already narrowed. */
+  /** The filter, when legal for this group; poolRows are already narrowed. */
   where: PivotWhere | null;
 }
 
-/** The pools a payload carries, in journey order. */
-export function presentPools(data: WorkbenchView): ViewKey[] {
-  const seen = new Set<ViewKey>();
-  for (const row of data.facts ?? []) for (const v of data.prompts[row[R.prompt]].views) seen.add(v);
-  return POOLS.map((p) => p.key).filter((k) => seen.has(k));
+/** The groups a payload carries, in journey order. */
+export function presentPools(data: WorkbenchView): DataPoolKey[] {
+  const seen = new Set<DataPoolKey>();
+  for (const row of data.facts ?? []) seen.add(data.prompts[row[R.prompt]].pool);
+  return DATA_POOLS.map((p) => p.key).filter((k) => seen.has(k));
 }
 
-/** Why a dimension cannot be used for this pool and measure; null = legal. */
-export function dimReason(
-  data: WorkbenchView,
-  pool: ViewKey,
-  measure: MeasureDef,
-  poolRows: WbRow[],
-  k: DimKey
-): string | null {
-  const anyPrompt = (f: (p: WorkbenchView["prompts"][number]) => boolean) => poolRows.some((r) => f(data.prompts[r[R.prompt]]));
+/** Why a dimension cannot be used for this group and number; null = legal. */
+export function dimReason(data: WorkbenchView, pool: DataPoolKey, measure: MeasureDef, poolRows: AnswerFact[], k: DimKey): string | null {
+  void pool;
   switch (k) {
     case "room":
-      return anyPrompt((p) => p.room >= 0) ? null : "these questions are not asked per buying situation";
+      return poolRows.some((f) => f.situation !== null) ? null : "these questions are not asked per buying situation";
     case "worry":
-      return anyPrompt((p) => p.worry >= 0) ? null : "these questions carry no worry";
+      return poolRows.some((f) => f.worry !== null) ? null : "these questions carry no worry";
     case "rival":
-      return anyPrompt((p) => p.rival >= 0 || p.angle >= 0) ? null : "these questions name no rival";
+      return poolRows.some((f) => f.rival !== null) ? null : "these questions name no rival";
     case "brand":
       return measure.brand ? null : "this measure is not per brand";
     case "parent":
       if (!measure.brand) return "this measure is not per brand";
       return data.brands.some((b) => b.listed && b.parent) ? null : "no parent companies set";
     case "argument":
-      return poolAsks(pool, "arguments") ? null : "no arguments are coded for these questions";
+      return poolRows.some((f) => (f.args ?? []).length > 0) ? null : "no arguments are coded for these questions";
     default:
       return null;
   }
 }
 
+/** The group's answers (the payload's decoded answer facts in it). */
+const poolAnswers = (data: WorkbenchView, pool: DataPoolKey) => {
+  const all = decodeFacts(data);
+  return all.filter((_, i) => data.prompts[data.facts[i][R.prompt]].pool === pool);
+};
+
 export function resolveSettings(s: PivotSettings, data: WorkbenchView): Resolved | null {
   if (!data.facts) return null;
   const present = presentPools(data);
-  const pool = s.pool && present.includes(s.pool) ? s.pool : present.includes("headline") ? "headline" : (present[0] ?? null);
+  const pool = s.pool && present.includes(s.pool) ? s.pool : present.includes("what_to_buy") ? "what_to_buy" : (present[0] ?? null);
   if (!pool) return null;
   let measures = [...new Set(s.measures)]
-    .map((id) => MEASURE_BY_ID.get(id))
+    .map((id) => DATA_BY_ID.get(id))
     .filter((m): m is MeasureDef => !!m && !illegalReason(m, pool));
   if (measures.length === 0) {
     const d = POOL_DEFAULT[pool];
-    const fallback = d ? MEASURE_BY_ID.get(d) : undefined;
+    const fallback = d ? DATA_BY_ID.get(d) : undefined;
     const first = fallback && !illegalReason(fallback, pool) ? fallback : MEASURES.find((m) => !illegalReason(m, pool));
     if (!first) return null;
     measures = [first];
   }
-  const allPoolRows = data.facts.filter((r) => data.prompts[r[R.prompt]].views.includes(pool));
+  const allPoolRows = poolAnswers(data, pool);
   // A dimension must be legal for EVERY measure on the table.
   const legal = (k: DimKey) => measures.every((m) => !dimReason(data, pool, m, allPoolRows, k));
   const where = s.where && FILTER_DIMS.includes(s.where.dim) && legal(s.where.dim) ? s.where : null;
-  const poolRows = where ? allPoolRows.filter((r) => whereLabel(data, where.dim, r) === where.label) : allPoolRows;
+  const poolRows = where ? allPoolRows.filter((f) => whereLabel(data, where.dim, f) === where.label) : allPoolRows;
   const rowDim: DimKey = legal(s.row) ? s.row : "none";
   const colDim: DimKey = !legal(s.col) || s.col === rowDim ? "none" : s.col;
   if (colDim !== "none") measures = measures.slice(0, 1);
   measures = measures.slice(0, MAX_MEASURES);
-  const named = s.brand === null ? -1 : data.brands.findIndex((b) => b.name === s.brand);
+  const named = s.brand === null ? -1 : data.brands.findIndex((b) => b.listed && b.name === s.brand);
   const brand = named >= 0 ? named : data.target;
   const a = s.arg === null ? -1 : data.args.indexOf(s.arg);
   const arg = a >= 0 ? a : 0;
@@ -269,33 +275,54 @@ export function resolveSettings(s: PivotSettings, data: WorkbenchView): Resolved
   };
 }
 
-/** The label an answer carries on a filterable dimension (the same labels
- * computePivot's rows use). */
-export function whereLabel(data: WorkbenchView, dim: DimKey, r: WbRow): string | null {
-  const p = data.prompts[r[R.prompt]];
-  const e = data.engines[r[R.engine]];
+/** The label an answer carries on a filterable dimension (the same labels computePivot's rows use). */
+export function whereLabel(data: WorkbenchView, dim: DimKey, f: AnswerFact): string | null {
+  const e = f.engine;
   switch (dim) {
     case "room":
-      return p.room >= 0 ? data.rooms[p.room] : null;
+      return f.situation;
     case "worry":
-      return p.worry >= 0 ? data.worries[p.worry] : null;
+      return f.worry;
     case "rival":
-      return p.rival >= 0 ? data.brands[p.rival].name : p.angle >= 0 ? titleCase(data.angles[p.angle]) : null;
+      return f.rival?.name ?? null;
     case "engine":
-      return e.label;
+      return data.engines.find((x) => x.id === e.id)?.label ?? e.id;
     case "vendor":
-      return e.vendor ?? e.label;
+      return e.vendor;
     case "tier":
-      return TIER_LABEL[e.tier ?? "both"];
+      return TIER_LABEL[e.tier as keyof typeof TIER_LABEL] ?? e.tier;
     case "mode":
-      return MODE_LABEL[e.mode];
+      return MODE_LABEL[e.mode as keyof typeof MODE_LABEL] ?? e.mode;
     default:
       return null;
   }
 }
 
-/** The settings a resolution stands for (to resolve the same table on
- * another wave's payload). */
+/** The scope a filter stands for (the answers carrying its label). */
+function whereScope(data: WorkbenchView, w: PivotWhere, rows: AnswerFact[]): Partial<Scope> {
+  const f = rows.find((x) => whereLabel(data, w.dim, x) === w.label);
+  if (!f) return {};
+  switch (w.dim) {
+    case "room":
+      return { situation: f.situation };
+    case "worry":
+      return { worry: f.worry };
+    case "rival":
+      return { rival: f.rival?.key ?? "generic" };
+    case "engine":
+      return { engines: [f.engine.id] };
+    case "vendor":
+      return { vendor: f.engine.vendor };
+    case "tier":
+      return { tier: f.engine.tier };
+    case "mode":
+      return { mode: f.engine.mode };
+    default:
+      return {};
+  }
+}
+
+/** The settings a resolution stands for (to resolve the same table on another wave's payload). */
 export function settingsOf(r: Resolved, data: WorkbenchView): PivotSettings {
   return {
     pool: r.pool,
@@ -308,28 +335,37 @@ export function settingsOf(r: Resolved, data: WorkbenchView): PivotSettings {
   };
 }
 
+/** A cell: its counts, its printed text (the measure's print rule), the answers it counts (the evidence drill) and
+ * the fact it is - not drawn; the check recomputes it on the server from this id alone. */
 export interface Acc {
   k: number;
   n: number;
   ids: string[];
+  text: string;
+  fact: string;
 }
 
-/** One dimension value: its key, label and (for brand / argument context)
- * what it sets on the measure. */
+/** One dimension value: its key, label and what it sets on the cell's fact - a part of the scope, a subject (a
+ * brand or a company) or an argument. */
 export interface DimValue {
   key: string;
   label: string;
   /** What matches it across waves (its label; a question's full text). */
   match: string;
-  /** Question values: the full prompt text (tooltip, csv) and its stage. */
+  /** Question values: the full prompt text (tooltip, csv) and its question type. */
   full?: string;
   group?: string;
+  /** Brand / company context: the brand indexes it reads. */
   brands?: Set<number>;
+  /** The fact subject it sets (a brand key, "co:<company>"). */
+  subject?: string;
   arg?: number;
+  /** The scope fields it narrows. */
+  scope?: Partial<Scope>;
 }
 
-/** A column: a dimension value read with the table's one measure, or (when
- * Columns is None) one of the table's measures. */
+/** A column: a dimension value read with the table's one measure, or (when Columns is None) one of the table's
+ * measures. */
 export interface PivotCol extends DimValue {
   measure: MeasureDef;
 }
@@ -343,134 +379,122 @@ export interface Pivot {
 
 export const cellKey = (r: DimValue, c: PivotCol) => `${r.key}|${c.key}`;
 
-export function computePivot(res: Resolved, data: WorkbenchView): Pivot {
-  const { measures, rowDim, colDim, brand, arg, poolRows } = res;
-  const P = data.prompts;
-  const engineOf = (r: WbRow) => data.engines[r[R.engine]];
-  const lead = measures[0];
+const enc = (s: string) => encodeURIComponent(s);
 
-  // Brand / argument dimensions are CONTEXT for a measure that reads them
-  // (every answer sits in every brand's cell, the measure evaluated for
-  // that brand); argument is a FILTER otherwise (answers carrying it).
+export function computePivot(res: Resolved, data: WorkbenchView): Pivot {
+  const { measures, rowDim, colDim, brand, arg, poolRows, pool } = res;
+  const lead = measures[0];
+  const B = data.brands;
+  const T = B[data.target];
+  const set = { target: { key: T.key, name: T.name } } as unknown as MeasureCtx["set"];
+  const engineScope: Partial<Scope> = data.engineScope ? { engines: data.engineScope } : {};
+  const baseScope: Scope = { types: DATA_POOL_BY_KEY.get(pool)!.types, ...engineScope, ...(res.where ? whereScope(data, res.where, poolRows) : {}) };
+  const labelOfEngine = new Map(data.engines.map((e) => [e.id, e.label]));
+  const cellIndex = new Map(data.cellIds.map((id, i) => [id, i]));
+  const engineOrder = new Map(data.engines.map((e, i) => [e.id, i]));
+
+  // Brand / argument dimensions are CONTEXT for a measure that reads them (every answer sits in every brand's cell,
+  // the measure read for that brand); argument is a FILTER otherwise (the answers carrying it).
   const brandValues = (grain: "brand" | "parent"): DimValue[] => {
     if (grain === "brand") {
-      return data.brands.flatMap((b, i) => (b.listed ? [{ key: `b${i}`, label: b.name, match: b.name, brands: new Set([i]) }] : []));
+      return B.flatMap((b, i) => (b.listed ? [{ key: `b${i}`, label: b.name, match: b.name, brands: new Set([i]), subject: b.key }] : []));
     }
     const groups = new Map<string, DimValue>();
-    data.brands.forEach((b, i) => {
+    B.forEach((b, i) => {
       if (!b.listed) return;
       const name = b.parent ?? b.name;
-      const g = groups.get(name) ?? { key: `p${name}`, label: name, match: name, brands: new Set<number>() };
+      const g = groups.get(name) ?? { key: `p${name}`, label: name, match: name, brands: new Set<number>(), subject: `co:${name}` };
       g.brands!.add(i);
       groups.set(name, g);
     });
     return [...groups.values()];
   };
   const argValues: DimValue[] = data.args.map((a, i) => ({ key: `a${i}`, label: a, match: a, arg: i }));
-  const one = (key: string, label: string): DimValue => ({ key, label, match: label });
+  const argFilter = (i: number): DimValue => ({ ...argValues[i], scope: { when: `argany:${enc(data.args[i])}` } });
+  const one = (key: string, label: string, scope: Partial<Scope>): DimValue => ({ key, label, match: label, scope });
 
-  const valuesOf = (dim: DimKey): ((r: WbRow) => DimValue[]) | DimValue[] => {
+  const valuesOf = (dim: DimKey): ((f: AnswerFact) => DimValue[]) | DimValue[] => {
     switch (dim) {
       case "none":
-        return [one("all", "All answers")];
+        return [one("all", "All answers", {})];
       case "room":
-        return (r) => {
-          const i = P[r[R.prompt]].room;
-          return [i >= 0 ? one(`r${i}`, data.rooms[i]) : one("r-", "Every buyer (not one situation)")];
-        };
+        return (f) => [f.situation !== null ? one(`r:${f.situation}`, f.situation, { situation: f.situation }) : one("r-", "Every buyer (not one situation)", { situation: null })];
       case "worry":
-        return (r) => {
-          const i = P[r[R.prompt]].worry;
-          return [i >= 0 ? one(`w${i}`, data.worries[i]) : one("w-", "No worry")];
-        };
+        return (f) => [f.worry !== null ? one(`w:${f.worry}`, f.worry, { worry: f.worry }) : one("w-", "No worry", { worry: null })];
       case "rival":
-        return (r) => {
-          const p = P[r[R.prompt]];
-          if (p.rival >= 0) return [one(`b${p.rival}`, data.brands[p.rival].name)];
-          if (p.angle >= 0) return [one(`g${p.angle}`, titleCase(data.angles[p.angle]))];
-          return [one("-", "No rival named")];
-        };
+        return (f) => [f.rival ? one(`b:${f.rival.key}`, f.rival.name, { rival: f.rival.key }) : one("-", "No rival named", { rival: "generic" })];
       case "stage":
-        return (r) => {
-          const s = P[r[R.prompt]].stage;
-          return [one(s, titleCase(s))];
-        };
+        return (f) => [one(f.type, titleCase(f.type), { types: [f.type] })];
       case "question":
-        // One value per question (cell): its seed and paraphrases pool, the
-        // seed wording names it. Pre-wb5 payloads fall back to one per prompt.
-        return (r) => {
-          const i = r[R.prompt];
-          const p = P[i];
-          const cell = p.cell ?? -1;
-          const text = cell >= 0 && data.cells?.[cell] ? data.cells[cell] : p.text;
-          return [{ key: cell >= 0 ? `q${cell}` : `p${i}`, label: shortText(text, 90), match: text, full: text, group: titleCase(p.stage) }];
+        // One value per question (cell): its seed and rewordings pool, the seed wording names it.
+        return (f) => {
+          const i = cellIndex.get(f.intentId) ?? -1;
+          const text = data.cells[i] ?? "";
+          return [{ key: `q${i}`, label: shortText(text, 90), match: text, full: text, group: titleCase(f.type), scope: { intent: f.intentId } }];
         };
       case "engine":
-        return (r) => [one(`e${r[R.engine]}`, engineOf(r).label)];
+        return (f) => [one(`e:${f.engine.id}`, labelOfEngine.get(f.engine.id) ?? f.engine.id, { engines: [f.engine.id] })];
       case "vendor":
-        // Engines pooled by vendor (older payloads carry no vendor: the label).
-        return (r) => {
-          const v = engineOf(r).vendor ?? engineOf(r).label;
-          return [one(`v:${v}`, v)];
-        };
+        return (f) => [one(`v:${f.engine.vendor}`, f.engine.vendor, { vendor: f.engine.vendor })];
       case "tier":
-        return (r) => {
-          const t = engineOf(r).tier ?? "both";
-          return [one(`t:${t}`, TIER_LABEL[t])];
-        };
+        return (f) => [one(`t:${f.engine.tier}`, TIER_LABEL[f.engine.tier as keyof typeof TIER_LABEL] ?? f.engine.tier, { tier: f.engine.tier })];
       case "mode":
-        return (r) => {
-          const m = engineOf(r).mode;
-          return [one(m, MODE_LABEL[m])];
-        };
+        return (f) => [one(f.engine.mode, MODE_LABEL[f.engine.mode as keyof typeof MODE_LABEL] ?? f.engine.mode, { mode: f.engine.mode })];
       case "brand":
       case "parent":
         return brandValues(dim);
       case "argument":
         if (lead.arg) return argValues;
-        return (r) => r[R.args].map((a) => argValues[a]);
+        return (f) => (f.args ?? []).map((a) => argFilter(data.args.indexOf(a)));
     }
   };
   const rowVals = valuesOf(rowDim);
-  const at = (v: ((r: WbRow) => DimValue[]) | DimValue[], r: WbRow) => (typeof v === "function" ? v(r) : v);
-  // Columns: one per measure when Columns is None, else the dimension's
-  // values read with the one measure.
+  const at = (v: ((f: AnswerFact) => DimValue[]) | DimValue[], f: AnswerFact) => (typeof v === "function" ? v(f) : v);
+  // Columns: one per measure when Columns is None, else the dimension's values read with the one measure.
   const measureCols: PivotCol[] = measures.map((m) => ({ key: `m:${m.id}`, label: mLabel(m), match: `m:${m.id}`, measure: m }));
   const colVals = colDim === "none" ? null : valuesOf(colDim);
-  const colsAt = (r: WbRow): PivotCol[] => (colVals ? at(colVals, r).map((v) => ({ ...v, measure: lead })) : measureCols);
+  const colsAt = (f: AnswerFact): PivotCol[] => (colVals ? at(colVals, f).map((v) => ({ ...v, measure: lead })) : measureCols);
+
+  // Each cell's fact: the measure, the subject (the row's or column's brand or company, else the table's brand,
+  // you, the rival or the answer), the argument, and the scope (the group's types, the panel cut, the filter, and
+  // whatever the row and column narrow).
+  const cellSpec = (rv: DimValue, cv: PivotCol) => {
+    const m = cv.measure;
+    const book = MEASURE_BY_ID.get(m.measure)!;
+    const head = m.subject === "brand" ? (rv.subject ?? cv.subject ?? B[brand].key) : m.subject === "you" ? T.key : m.subject;
+    const argIdx = rv.arg ?? cv.arg ?? arg;
+    const argCode = m.arg ? (data.args[argIdx] ?? null) : null;
+    const scope: Scope = { ...baseScope, ...rv.scope, ...cv.scope };
+    const companyKeys = head.startsWith("co:") ? new Set([...(rv.brands ?? cv.brands ?? [])].map((i) => B[i].key)) : null;
+    const ctx: MeasureCtx = { set, brand: head === "ai" || head === "rival" || companyKeys ? null : head, brands: companyKeys, rival: head === "rival", arg: argCode, cond: null, slice: null };
+    return { book, ctx, id: factId(m.measure, `${head}${argCode ? `/arg:${argCode}` : ""}`, scope), scope };
+  };
 
   const cells = new Map<string, Acc>();
+  const specs = new Map<string, ReturnType<typeof cellSpec>>();
   const rowOrder = new Map<string, DimValue>();
   const colOrder = new Map<string, PivotCol>();
-  const fixedBrands = new Set([brand]);
-  for (const r of poolRows) {
-    const prompt = P[r[R.prompt]];
-    for (const rv of at(rowVals, r)) {
-      for (const cv of colsAt(r)) {
-        const ctx: MeasureCtx = {
-          target: data.target,
-          brands: rv.brands ?? cv.brands ?? fixedBrands,
-          arg: rv.arg ?? cv.arg ?? arg,
-          prompt,
-        };
-        const hit = cv.measure.calc(r, ctx);
-        if (hit === null) continue;
+  for (const f of poolRows) {
+    for (const rv of at(rowVals, f)) {
+      for (const cv of colsAt(f)) {
+        const key = `${rv.key}|${cv.key}`;
+        let sp = specs.get(key);
+        if (!sp) specs.set(key, (sp = cellSpec(rv, cv)));
+        if (!sp.book.base(f, sp.ctx)) continue;
         if (!rowOrder.has(rv.key)) rowOrder.set(rv.key, rv);
         if (!colOrder.has(cv.key)) colOrder.set(cv.key, cv);
-        const key = `${rv.key}|${cv.key}`;
-        const acc = cells.get(key) ?? { k: 0, n: 0, ids: [] };
+        const acc = cells.get(key) ?? { k: 0, n: 0, ids: [], text: "", fact: sp.id };
         acc.n++;
-        if (hit === 1) {
+        if (sp.book.hit(f, sp.ctx)) {
           acc.k++;
-          if (acc.ids.length < EVIDENCE_CAP) acc.ids.push(data.responseIds[r[R.response]]);
+          if (acc.ids.length < EVIDENCE_CAP) acc.ids.push(f.responseId);
         }
         cells.set(key, acc);
       }
     }
   }
-
-  // Order: context lists (brands, arguments) by numerator volume, capped;
-  // everything else in first-seen order of its own index.
+  for (const [key, acc] of cells) acc.text = printOf(specs.get(key)!.book, acc.k, acc.n);
+  // Order: context lists (brands, arguments) by numerator volume, capped; everything else by its own order.
   const ordered = <V extends DimValue>(m: Map<string, V>, dim: DimKey, side: "row" | "col"): V[] => {
     let list = [...m.values()];
     if (side === "col" && dim === "none") {
@@ -494,17 +518,15 @@ export function computePivot(res: Resolved, data: WorkbenchView): Pivot {
         .slice(0, DIM_CAP)
         .map((s) => s.v);
     } else if (dim === "question") {
-      // Grouped under the stage, then the questions carrying most of the
-      // numerator first - one question can own a tracker's number.
+      // Grouped under the question type, then the questions carrying most of the numerator first.
       list = list
         .map((v) => ({ v, k: total(v) }))
         .sort((a, b) => (a.v.group ?? "").localeCompare(b.v.group ?? "") || b.k - a.k || a.v.label.localeCompare(b.v.label))
         .map((s) => s.v);
     } else if (dim === "engine") {
-      list.sort((a, b) => Number(a.key.slice(1)) - Number(b.key.slice(1)));
+      list.sort((a, b) => (engineOrder.get(a.key.slice(2)) ?? 0) - (engineOrder.get(b.key.slice(2)) ?? 0));
     } else {
-      // Alphabetical, with the catch-all bucket ("not one situation", "no
-      // worry", "no rival") last.
+      // Alphabetical, with the catch-all bucket ("not one situation", "no worry", "no rival") last.
       const last = (v: DimValue) => (v.key.endsWith("-") ? 1 : 0);
       list.sort((a, b) => last(a) - last(b) || a.label.localeCompare(b.label));
     }

@@ -132,7 +132,7 @@ function computeKind<V extends string>(
   request: ViewRequest
 ): DoubtView<V> | null {
   const { project, dictionary } = data;
-  const resolve = buildResolver(dictionary, data.judged);
+  const resolve = buildResolver(dictionary, data.judged, data.names);
   const targetKey = resolve(project.brand).key;
   const { rows: pool, uncoded, core } = poolOf(data, kind === "objections" ? "doubt" : "keep_or_leave", request);
   if (pool.length === 0 && uncoded === 0) return null;
