@@ -18,7 +18,7 @@ export type { WbBrand, WbEngine, WbFact, WbPrompt, WorkbenchView } from "./workb
  * it with the measure's own base and numerator.
  *
  * What a row carries is what the measures read (workbench_rows.ts decodes it back into an AnswerFact):
- *   [engine, prompt, response, pick, brands, args, verdicts, sent, price]
+ *   [engine, prompt, response, pick, brands, args, verdicts, sent, price, sources]
  *  - pick: index into `brands` of the pick (any bucket - ruling 8 reads the brand's bucket); -1 = no pick;
  *  - brands: [index, bits] for every brand IN ANALYSIS the answer names, in order of first appearance (bits: 1
  *    recommended - a pick counts, ruling 6 -, 2 named as one to avoid); brands outside of analysis are left out
@@ -27,7 +27,9 @@ export type { WbBrand, WbEngine, WbFact, WbPrompt, WorkbenchView } from "./workb
  *  - sent: null = not asked, else [brands in analysis it sends the buyer to, how many of the tracker's own other
  *    products it offers];
  *  - price: null = not a price question, else [0 a rival / 1 only your own option / 2 nowhere (ruling 3), the rivals
- *    it recommends instead].
+ *    it recommends instead];
+ *  - sources: null = the assistant does not search, else the indexes into `sources` of the sites it cites (one per
+ *    distinct site, facts/sources.ts); `sourceOwner` says whose own site each is.
  *
  * The first version's rollups (rows / extra / doubt / codes) are gone: nothing read them.
  */
@@ -54,6 +56,7 @@ export function computeWorkbench(data: ViewData, request: ViewRequest = {}): Wor
     see(f.rival?.key, f.rival?.name);
     for (const b of f.sent?.brands ?? []) see(b.key, b.name);
     for (const r of f.price?.rivals ?? []) see(r.key, r.name);
+    for (const x of f.sources ?? []) see(x.owner, x.owner ? set.nameOf(x.owner) : null);
   }
   const brandKeys = [...named.keys()].sort((a, b) => (named.get(b) ?? 0) - (named.get(a) ?? 0) || a.localeCompare(b));
   const brandIdx = new Map(brandKeys.map((k, i) => [k, i]));
@@ -123,6 +126,21 @@ export function computeWorkbench(data: ViewData, request: ViewRequest = {}): Wor
   const args = [...argCount.keys()].sort((a, b) => (argCount.get(b) ?? 0) - (argCount.get(a) ?? 0) || a.localeCompare(b));
   const argIdx = new Map(args.map((a, i) => [a, i]));
 
+  // Sources: the sites cited, most cited first, each with the brand whose own site it is.
+  const srcCount = new Map<string, number>();
+  const srcOwner = new Map<string, string | null>();
+  for (const f of set.facts)
+    for (const x of f.sources ?? []) {
+      srcCount.set(x.site, (srcCount.get(x.site) ?? 0) + 1);
+      srcOwner.set(x.site, x.owner);
+    }
+  const sources = [...srcCount.keys()].sort((a, b) => (srcCount.get(b) ?? 0) - (srcCount.get(a) ?? 0) || a.localeCompare(b));
+  const srcIdx = new Map(sources.map((x, i) => [x, i]));
+  const sourceOwner = sources.map((x) => {
+    const o = srcOwner.get(x);
+    return o ? (brandIdx.get(o) ?? -1) : -1;
+  });
+
   const responseIds: string[] = [];
   const facts: WbFact[] = set.facts.map((f) => {
     const row: WbFact = [
@@ -138,6 +156,7 @@ export function computeWorkbench(data: ViewData, request: ViewRequest = {}): Wor
       }),
       f.sent ? [f.sent.brands.map((b) => brandIdx.get(b.key)!), f.sent.own.length] : null,
       f.price ? [f.price.bucket === "rival" ? 0 : f.price.bucket === "own" ? 1 : 2, f.price.rivals.map((r) => brandIdx.get(r.key)!)] : null,
+      f.sources ? f.sources.map((x) => srcIdx.get(x.site)!) : null,
     ];
     responseIds.push(f.responseId);
     return row;
@@ -173,6 +192,8 @@ export function computeWorkbench(data: ViewData, request: ViewRequest = {}): Wor
     cells: cellIds.list.map((id) => intentById.get(id)?.text ?? ""),
     cellIds: cellIds.list,
     args,
+    sources,
+    sourceOwner,
     responseIds,
     facts,
   };
@@ -186,7 +207,9 @@ export function computeWorkbench(data: ViewData, request: ViewRequest = {}): Wor
 // wb6: brands carry the dictionary's aliases (the Data page's search).
 // wb7 (2026-11-17, fact layer step 6): the payload is the run's answer facts (facts/answer_facts.ts), counted in the
 // browser with the measure book; the first version's rollups (rows / extra / doubt / codes) are dropped.
-const WORKBENCH_VERSION = "wb7";
+// wb8 (2026-11-18): the sites each answer cites (facts/sources.ts) and whose own site each is - the Data page's
+// Source dimension and the source numbers.
+const WORKBENCH_VERSION = "wb8";
 export function computeWorkbenchCached(run: Run, project: Project, request: ViewRequest = {}): Promise<WorkbenchView | null> {
   const r = requestOf(request);
   return cachedView("workbench", WORKBENCH_VERSION, run, project, (d) => computeWorkbench(d, r), { judge: true, setupDecision: true }, r);

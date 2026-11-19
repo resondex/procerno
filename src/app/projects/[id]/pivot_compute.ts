@@ -33,11 +33,16 @@ import { MODE_LABEL, TIER_LABEL } from "./view_parts";
  * resolves away here (to the group's default number, to "None"), so no table
  * renders a number its questions never asked.
  *
- * Settings name the brand and the argument by NAME, not index, so the same
- * settings resolve on another run's payload.
+ * Settings name the brand, the argument and the source by NAME, not index,
+ * so the same settings resolve on another run's payload.
+ *
+ * Sources (2026-11-18): the sites a search assistant's answer cites
+ * (facts/sources.ts). "Source" works like "Argument": a context list when the
+ * lead number reads a source (each row reads its own site), a filter
+ * otherwise (the answers citing that site, scope `when` "srcany:<site>").
  */
 
-export type DimKey = "none" | "room" | "worry" | "rival" | "stage" | "question" | "engine" | "vendor" | "tier" | "mode" | "brand" | "parent" | "argument";
+export type DimKey = "none" | "room" | "worry" | "rival" | "stage" | "question" | "engine" | "vendor" | "tier" | "mode" | "brand" | "parent" | "argument" | "source";
 
 export const DIMS: { key: DimKey; label: string }[] = [
   { key: "none", label: "None" },
@@ -53,6 +58,7 @@ export const DIMS: { key: DimKey; label: string }[] = [
   { key: "brand", label: "Brand" },
   { key: "parent", label: "Company" },
   { key: "argument", label: "Argument" },
+  { key: "source", label: "Source" },
 ];
 export const DIM_LABEL = Object.fromEntries(DIMS.map((d) => [d.key, d.label])) as Record<DimKey, string>;
 const DIM_KEYS = new Set<string>(DIMS.map((d) => d.key));
@@ -72,6 +78,7 @@ export const DIM_NOUN: Record<DimKey, string> = {
   brand: "brand",
   parent: "company",
   argument: "argument",
+  source: "source",
 };
 
 /** Dimensions a table can be narrowed to one value of ("only this buyer"):
@@ -125,7 +132,7 @@ export const legalPools = (m: MeasureDef): DataPoolKey[] => DATA_POOLS.map((p) =
 export const MAX_MEASURES = 4;
 /** Cells under this many answers are muted, starred, and get no change. */
 export const THIN = 20;
-/** Brand and argument dimensions list at most this many values. */
+/** Brand, argument and source dimensions list at most this many values. */
 const DIM_CAP = 20;
 
 /** Wilson 95% interval - the same math as engine/metrics.ts wilson(). */
@@ -154,6 +161,8 @@ export interface PivotSettings {
   brand: string | null;
   /** The argument an incidence measure reads, by label; null = the first. */
   arg: string | null;
+  /** The source (site) a source number reads, by name; null = the most cited. */
+  src: string | null;
   /** Only the answers carrying this value (search sets it); absent = all. */
   where?: PivotWhere | null;
 }
@@ -171,6 +180,7 @@ export function sanitizeSettings(x: unknown): PivotSettings | null {
     col: dim(o.col),
     brand: typeof o.brand === "string" ? o.brand : null,
     arg: typeof o.arg === "string" ? o.arg : null,
+    src: typeof o.src === "string" ? o.src : null,
     where:
       w && typeof w === "object" && typeof w.label === "string" && FILTER_DIMS.includes(dim(w.dim))
         ? { dim: dim(w.dim), label: w.label }
@@ -186,12 +196,15 @@ export interface Resolved {
   colDim: DimKey;
   brand: number;
   arg: number;
+  /** Index into the payload's `sources`. */
+  src: number;
   /** The groups this payload carries, in journey order. */
   present: DataPoolKey[];
   /** The group's answers (the filter applied). */
   poolRows: AnswerFact[];
   needsBrand: boolean;
   needsArg: boolean;
+  needsSrc: boolean;
   /** The filter, when legal for this group; poolRows are already narrowed. */
   where: PivotWhere | null;
 }
@@ -220,6 +233,8 @@ export function dimReason(data: WorkbenchView, pool: DataPoolKey, measure: Measu
       return data.brands.some((b) => b.listed && b.parent) ? null : "no parent companies set";
     case "argument":
       return poolRows.some((f) => (f.args ?? []).length > 0) ? null : "no arguments are coded for these questions";
+    case "source":
+      return poolRows.some((f) => (f.sources ?? []).length > 0) ? null : "none of these answers cite a source";
     default:
       return null;
   }
@@ -259,6 +274,8 @@ export function resolveSettings(s: PivotSettings, data: WorkbenchView): Resolved
   const brand = named >= 0 ? named : data.target;
   const a = s.arg === null ? -1 : data.args.indexOf(s.arg);
   const arg = a >= 0 ? a : 0;
+  const sx = s.src === null || !data.sources ? -1 : data.sources.indexOf(s.src);
+  const src = sx >= 0 ? sx : 0;
   const byBrand = (d: DimKey) => d === "brand" || d === "parent";
   return {
     pool,
@@ -267,10 +284,12 @@ export function resolveSettings(s: PivotSettings, data: WorkbenchView): Resolved
     colDim,
     brand,
     arg,
+    src,
     present,
     poolRows,
     needsBrand: measures.some((m) => m.brand) && !byBrand(rowDim) && !byBrand(colDim),
     needsArg: measures.some((m) => m.arg) && rowDim !== "argument" && colDim !== "argument",
+    needsSrc: measures.some((m) => m.src) && rowDim !== "source" && colDim !== "source",
     where,
   };
 }
@@ -331,6 +350,7 @@ export function settingsOf(r: Resolved, data: WorkbenchView): PivotSettings {
     col: r.colDim,
     brand: r.brand === data.target ? null : (data.brands[r.brand]?.name ?? null),
     arg: data.args[r.arg] ?? null,
+    src: data.sources?.[r.src] ?? null,
     where: r.where,
   };
 }
@@ -360,6 +380,8 @@ export interface DimValue {
   /** The fact subject it sets (a brand key, "co:<company>"). */
   subject?: string;
   arg?: number;
+  /** Source context: the index into `sources` it reads. */
+  src?: number;
   /** The scope fields it narrows. */
   scope?: Partial<Scope>;
 }
@@ -382,7 +404,7 @@ export const cellKey = (r: DimValue, c: PivotCol) => `${r.key}|${c.key}`;
 const enc = (s: string) => encodeURIComponent(s);
 
 export function computePivot(res: Resolved, data: WorkbenchView): Pivot {
-  const { measures, rowDim, colDim, brand, arg, poolRows, pool } = res;
+  const { measures, rowDim, colDim, brand, arg, src, poolRows, pool } = res;
   const lead = measures[0];
   const B = data.brands;
   const T = B[data.target];
@@ -411,6 +433,10 @@ export function computePivot(res: Resolved, data: WorkbenchView): Pivot {
   };
   const argValues: DimValue[] = data.args.map((a, i) => ({ key: `a${i}`, label: a, match: a, arg: i }));
   const argFilter = (i: number): DimValue => ({ ...argValues[i], scope: { when: `argany:${enc(data.args[i])}` } });
+  const sites = data.sources ?? [];
+  const srcValues: DimValue[] = sites.map((x, i) => ({ key: `s${i}`, label: x, match: x, src: i }));
+  const srcAt = new Map(sites.map((x, i) => [x, i]));
+  const srcFilter = (i: number): DimValue => ({ ...srcValues[i], scope: { when: `srcany:${enc(sites[i])}` } });
   const one = (key: string, label: string, scope: Partial<Scope>): DimValue => ({ key, label, match: label, scope });
 
   const valuesOf = (dim: DimKey): ((f: AnswerFact) => DimValue[]) | DimValue[] => {
@@ -446,6 +472,9 @@ export function computePivot(res: Resolved, data: WorkbenchView): Pivot {
       case "argument":
         if (lead.arg) return argValues;
         return (f) => (f.args ?? []).map((a) => argFilter(data.args.indexOf(a)));
+      case "source":
+        if (lead.src) return srcValues;
+        return (f) => (f.sources ?? []).map((x) => srcFilter(srcAt.get(x.site)!));
     }
   };
   const rowVals = valuesOf(rowDim);
@@ -464,10 +493,12 @@ export function computePivot(res: Resolved, data: WorkbenchView): Pivot {
     const head = m.subject === "brand" ? (rv.subject ?? cv.subject ?? B[brand].key) : m.subject === "you" ? T.key : m.subject;
     const argIdx = rv.arg ?? cv.arg ?? arg;
     const argCode = m.arg ? (data.args[argIdx] ?? null) : null;
+    const srcIdx = rv.src ?? cv.src ?? src;
+    const site = m.src ? (sites[srcIdx] ?? null) : null;
     const scope: Scope = { ...baseScope, ...rv.scope, ...cv.scope };
     const companyKeys = head.startsWith("co:") ? new Set([...(rv.brands ?? cv.brands ?? [])].map((i) => B[i].key)) : null;
-    const ctx: MeasureCtx = { set, brand: head === "ai" || head === "rival" || companyKeys ? null : head, brands: companyKeys, rival: head === "rival", arg: argCode, cond: null, slice: null };
-    return { book, ctx, id: factId(m.measure, `${head}${argCode ? `/arg:${argCode}` : ""}`, scope), scope };
+    const ctx: MeasureCtx = { set, brand: head === "ai" || head === "rival" || companyKeys ? null : head, brands: companyKeys, rival: head === "rival", arg: argCode, src: site, cond: null, slice: null };
+    return { book, ctx, id: factId(m.measure, `${head}${argCode ? `/arg:${argCode}` : ""}${site ? `/src:${site}` : ""}`, scope), scope };
   };
 
   const cells = new Map<string, Acc>();
@@ -510,11 +541,26 @@ export function computePivot(res: Resolved, data: WorkbenchView): Pivot {
       }
       return k;
     };
-    if (dim === "brand" || dim === "parent" || (dim === "argument" && lead.arg)) {
+    if (dim === "brand" || dim === "parent" || (dim === "argument" && lead.arg) || (dim === "source" && lead.src)) {
       list = list
         .map((v) => ({ v, k: total(v) }))
         .filter((s) => s.k > 0 || s.v.brands?.has(data.target))
         .sort((a, b) => b.k - a.k || a.v.label.localeCompare(b.v.label))
+        .slice(0, DIM_CAP)
+        .map((s) => s.v);
+    } else if (dim === "source") {
+      // A filter over hundreds of sites: the sites carrying the most answers first, capped like the context lists.
+      const answers = (v: DimValue) => {
+        let n = 0;
+        for (const [key, acc] of cells) {
+          const [rk, ck] = key.split("|");
+          if ((side === "row" ? rk : ck) === v.key) n += acc.n;
+        }
+        return n;
+      };
+      list = list
+        .map((v) => ({ v, n: answers(v) }))
+        .sort((a, b) => b.n - a.n || a.v.label.localeCompare(b.v.label))
         .slice(0, DIM_CAP)
         .map((s) => s.v);
     } else if (dim === "question") {

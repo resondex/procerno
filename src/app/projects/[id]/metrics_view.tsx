@@ -58,8 +58,8 @@ import { T } from "./type_scale";
  * (one fetch per open, plus the previous wave's on first use).
  *
  * - Questions (the pool), one measure - or up to four side by side when
- *   Columns is None - Rows, Columns, and the brand / argument a measure
- *   reads. Legality is the measure book's alone (engine/facts/measure_book.ts;
+ *   Columns is None - Rows, Columns, and the brand / argument / source a
+ *   measure reads. Legality is the measure book's alone (engine/facts/measure_book.ts;
  *   pivot_compute.ts resolves): measures and dimensions the questions do not
  *   ask are hidden. Every cell is a fact and prints by its measure's rule.
  * - Show as: Table | Bars | Dots. Lines is not offered until three waves
@@ -107,6 +107,7 @@ const DIM_HINT: Partial<Record<DimKey, string>> = {
   brand: "Every brand on your board",
   parent: "Brands added up by the company that owns them",
   argument: "Each argument the AI makes",
+  source: "Each site the AI cites (assistants that search the web)",
 };
 /** Why a number is greyed: which question types do ask for it. */
 const askedIn = (m: MeasureDef) => {
@@ -214,7 +215,7 @@ export function PivotTable({
       </div>
     );
   }
-  const { pool, measures, rowDim, colDim, brand, arg, present, poolRows } = res;
+  const { pool, measures, rowDim, colDim, brand, arg, src, present, poolRows } = res;
   const lead = measures[0];
   const base = settingsOf(res, data);
   const change = (patch: Partial<PivotSettings>) => onSettings({ ...base, ...patch });
@@ -421,6 +422,7 @@ export function PivotTable({
   const sentence = [
     res.needsBrand ? `${chosenBrand.name} - ${lcFirst(mPhrase)}` : mPhrase,
     res.needsArg && data.args[arg] ? ` for the argument "${data.args[arg]}"` : "",
+    res.needsSrc && data.sources?.[src] ? ` for the source ${data.sources[src]}` : "",
     rowDim === "none" ? " across all answers" : ` for each ${DIM_NOUN[rowDim]}`,
     colDim === "none" ? "" : `, split by ${DIM_NOUN[colDim]}`,
     `. ${POOL_LABEL[pool]} questions`,
@@ -597,6 +599,16 @@ export function PivotTable({
               value={String(arg)}
               options={data.args.map((a, i) => ({ value: String(i), label: a }))}
               onChange={(v) => change({ arg: data.args[Number(v)] ?? null })}
+              width="min-w-[12rem]"
+            />
+          )}
+          {res.needsSrc && (data.sources?.length ?? 0) > 0 && (
+            <Choice
+              label="For source"
+              tip="These numbers are read for one site the AI cites. Sites are listed most cited first."
+              value={String(src)}
+              options={data.sources.map((x, i) => ({ value: String(i), label: x }))}
+              onChange={(v) => change({ src: data.sources[Number(v)] ?? null })}
               width="min-w-[12rem]"
             />
           )}

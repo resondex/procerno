@@ -6,7 +6,8 @@
  *
  * Only the fields the measures read are carried. Left out on purpose: brands outside of analysis among the brands
  * an answer names (ruling 8 - never a subject; the measures that read the bucket read only brands in analysis), the
- * written forms, conditions, pairings, decision rules and products (no Data page number reads them).
+ * written forms, conditions, pairings, decision rules and products (no Data page number reads them). The sites an
+ * answer cites ride as indexes into `sources` (null = the assistant does not search), each site with its owner.
  */
 import type { AnswerFact, Bucket, NamedBrand, QuestionType } from "./facts/answer_facts";
 import { VERDICT_FIELDS, VERDICT_VALUES } from "./facts/basics";
@@ -54,7 +55,7 @@ export interface WbPrompt {
   cell: number;
 }
 
-/** [engine, prompt, response, pick, brands, args, verdicts, sent, price] - see workbench.ts. */
+/** [engine, prompt, response, pick, brands, args, verdicts, sent, price, sources] - see workbench.ts. */
 export type WbFact = [
   number,
   number,
@@ -65,8 +66,9 @@ export type WbFact = [
   number[],
   [number[], number] | null,
   [number, number[]] | null,
+  number[] | null,
 ];
-export const R = { engine: 0, prompt: 1, response: 2, pick: 3, brands: 4, args: 5, verdicts: 6, sent: 7, price: 8 } as const;
+export const R = { engine: 0, prompt: 1, response: 2, pick: 3, brands: 4, args: 5, verdicts: 6, sent: 7, price: 8, sources: 9 } as const;
 
 export interface WorkbenchView {
   runId: string;
@@ -93,6 +95,10 @@ export interface WorkbenchView {
   cellIds: string[];
   /** Arguments and topics, most carried first. */
   args: string[];
+  /** The sites the answers cite (facts/sources.ts), most cited first. */
+  sources: string[];
+  /** Whose own site each source is: an index into `brands`, -1 = nobody's (aligned with `sources`). */
+  sourceOwner: number[];
   /** Answer ids, index-addressed by facts (the evidence drill). */
   responseIds: string[];
   facts: WbFact[];
@@ -119,6 +125,7 @@ export function decodeFacts(view: WorkbenchView): AnswerFact[] {
     });
     const sent = r[R.sent];
     const price = r[R.price];
+    const srcs = r[R.sources];
     return {
       responseId: view.responseIds[r[R.response]],
       promptId: String(r[R.prompt]),
@@ -144,6 +151,7 @@ export function decodeFacts(view: WorkbenchView): AnswerFact[] {
       pairings: null,
       rules: null,
       conds: null,
+      sources: srcs ? srcs.map((i) => ({ site: view.sources[i], owner: view.sourceOwner[i] >= 0 ? B[view.sourceOwner[i]].key : null })) : null,
     };
   });
   memo.set(view, out);

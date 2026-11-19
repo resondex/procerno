@@ -48,6 +48,7 @@
  *          | recin                  some brand in analysis is recommended (a pick counts)
  *          | args                   the answer carries arguments or topics (its schema asks them)
  *          | argany:<code>,<code>   it argues one of these codes (URI-encoded)
+ *          | srcany:<site>,<site>   it cites one of these sites (URI-encoded; sources.ts)
  *   <key>   a brand's dictionary entry id, "you" (the tracker) or "rival" (the answer's own named rival)
  *   <bucket> none | in_analysis | outside_analysis | outside_category  (ruling 8)
  *
@@ -291,6 +292,10 @@ function term(t: string, set: AnswerFactSet): Pred {
     case "argany": {
       const codes = arg.split(",").map((x) => decodeURIComponent(x));
       return (f) => !!f.args && codes.some((c) => f.args!.includes(c));
+    }
+    case "srcany": {
+      const sites = new Set(arg.split(",").map((x) => decodeURIComponent(x)));
+      return (f) => !!f.sources && f.sources.some((x) => sites.has(x.site));
     }
     default:
       throw new Error(`fact layer: slice "${t}": unknown term "${head}"`);

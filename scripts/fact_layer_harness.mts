@@ -2009,6 +2009,104 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
   failures.push(...local.unexplained.map((u) => `${brand}: ${u}`));
 }
 
+// SOURCES (2026-11-18): the sites a search assistant's answer cites (facts/sources.ts). (1) Unit cases for the site
+// helper and the owner rule. (2) An independent recount per tracker: "cites" for the ten most cited sites and
+// "cites_any" on What to buy (ruling 7), read straight from the test copy's responses.citations - the scope taken from
+// the stored prompts, intents, answer_codes rows and the core panel, never from the answer facts - must equal the fact.
+{
+  const { siteOf, mainLabel, siteOwnerLookup, sourcesOf } = await import(ROOT + "/src/lib/engine/facts/sources.ts");
+  const { corePanel } = await import(ROOT + "/src/lib/engine/view_data.ts");
+  const { engineFacets } = await import(ROOT + "/src/lib/engine/providers.ts");
+  const srcFail: string[] = [];
+  const eq = (label: string, got: unknown, want: unknown) => {
+    if (JSON.stringify(got) !== JSON.stringify(want)) srcFail.push(`unit ${label}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+  };
+  eq("subdomain", siteOf("https://support.atlassian.com/jira/docs/x"), "atlassian.com");
+  eq("www", siteOf("https://www.NerdWallet.com/article?x=1"), "nerdwallet.com");
+  eq("country subdomain", siteOf("https://uk.pcmag.com/phones"), "pcmag.com");
+  eq("store subdomain", siteOf("https://store.google.com/us/product"), "google.com");
+  eq("finance subdomain", siteOf("http://finance.yahoo.com/a"), "yahoo.com");
+  eq("two-part suffix", siteOf("https://www.bbc.co.uk/news/x"), "bbc.co.uk");
+  eq("two-part suffix, deep", siteOf("https://shop.example.com.au/x"), "example.com.au");
+  eq("no scheme", siteOf("www.reddit.com/r/x"), "reddit.com");
+  eq("bad url", siteOf("not a url"), null);
+  eq("empty", siteOf(""), null);
+  eq("no dot", siteOf("https://localhost/x"), null);
+  eq("ip", siteOf("http://192.168.1.1/x"), null);
+  eq("main label", mainLabel("bbc.co.uk"), "bbc");
+  eq("main label .com", mainLabel("americanexpress.com"), "americanexpress");
+  const owner = siteOwnerLookup(
+    [
+      { key: "T", names: ["American Express", "Amex"] },
+      { key: "C1", names: ["Capital One"] },
+      { key: "OP", names: ["OnePlus"] },
+      { key: "MX", names: ["Max (HBO)"] },
+      { key: "DUP", names: ["Amex"] },
+      { key: "SH", names: ["Ion"] },
+      { key: "GH", names: ["GitHub (Issues/Projects)"] },
+    ],
+    "T"
+  );
+  eq("owner, canonical", owner("americanexpress.com"), "T");
+  eq("owner, alias", owner("amex.com"), "T");
+  eq("owner, the tracker wins a tie", owner("amex.co.uk"), "T");
+  eq("owner, spaces compacted", owner("capitalone.com"), "C1");
+  eq("owner, declared alternate", owner("hbo.com"), null);
+  eq("owner, declared main name", owner("max.com"), null);
+  eq("owner, parenthetical as one", owner("maxhbo.com"), "MX");
+  eq("owner, declared alternate (4+ characters)", owner("projects.com"), "GH");
+  eq("owner, declared main name (4+ characters)", owner("github.com"), "GH");
+  eq("owner, never a part of a word", owner("ones.com"), null);
+  eq("owner, never a part of a word (2)", owner("oneplusreview.com"), null);
+  eq("owner, too short", owner("ion.com"), null);
+  eq("owner, nobody's", owner("nerdwallet.com"), null);
+  eq("sources dedupe per site", sourcesOf(["https://a.nerdwallet.com/1", "https://www.nerdwallet.com/2", "https://amex.com/x", "garbage"], owner), [
+    { site: "nerdwallet.com", owner: null },
+    { site: "amex.com", owner: "T" },
+  ]);
+  // max/hbo are under 4 characters: the length floor, not the parenthetical, keeps them out (checked above).
+
+  const Better = (await import("better-sqlite3")).default;
+  const db = new Better(process.env.SQLITE_PATH!, { readonly: true, fileMustExist: true });
+  const srcTot = { trackers: 0, facts: 0 };
+  for (const project of (await store.listProjects()).filter((p: any) => !p.archived_at)) {
+    const run = (await store.listRuns(project.id))[0];
+    const data: any = await loadViewData(run, project, { setupDecision: true, judge: true });
+    if (!data) continue;
+    const set = buildAnswerFacts(data);
+    const book = factBook(set);
+    // The scope, independently: What to buy prompts on the store's prompt list, a coded row under the tracker's codes
+    // source, an assistant on the core panel.
+    const wtbIntents = new Set(data.intents.filter((i: any) => i.stage === "discovery" || i.stage === "use_case").map((i: any) => i.id));
+    const wtbPrompts = new Set(data.prompts.filter((p: any) => p.intent_id && wtbIntents.has(p.intent_id)).map((p: any) => p.id));
+    const coded = new Set((db.prepare("SELECT response_id FROM answer_codes WHERE run_id = ? AND source = ?").all(run.id, data.source) as any[]).map((r) => r.response_id));
+    const core = corePanel(data);
+    const rows = (db.prepare("SELECT id, prompt_id, model, citations FROM responses WHERE run_id = ?").all(run.id) as any[]).filter(
+      (r) => wtbPrompts.has(r.prompt_id) && coded.has(r.id) && core.has(r.model ?? run.model)
+    );
+    const search = rows.filter((r) => engineFacets(r.model ?? run.model).mode === "search");
+    const sitesOf = (r: any) => new Set<string>((r.citations ? (JSON.parse(r.citations) as string[]) : []).map((u) => siteOf(u)).filter((x): x is string => !!x));
+    const citedRows = search.map(sitesOf).filter((x) => x.size > 0);
+    const count = new Map<string, number>();
+    for (const sites of citedRows) for (const x of sites) count.set(x, (count.get(x) ?? 0) + 1);
+    const top = [...count.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 10);
+    const any = book.fact("cites_any", "ai", WHAT_TO_BUY_ALL);
+    srcTot.facts++;
+    if (any.k !== citedRows.length || any.n !== search.length) srcFail.push(`${project.brand}: cites_any ${any.k}/${any.n}, recount ${citedRows.length}/${search.length}`);
+    for (const [site, k] of top) {
+      srcTot.facts++;
+      const f = book.fact("cites", `ai/src:${site}`, WHAT_TO_BUY_ALL);
+      if (f.k !== k || f.n !== citedRows.length) srcFail.push(`${project.brand}: cites ${site} ${f.k}/${f.n}, recount ${k}/${citedRows.length}`);
+    }
+    srcTot.trackers++;
+    console.log(`SOURCES ${project.brand}: What to buy - ${citedRows.length} of ${search.length} search-assistant answers cite a source; top sites ${top.slice(0, 5).map(([x, k]) => `${x} ${k}`).join(", ")}`);
+  }
+  db.close();
+  console.log(`SOURCES: unit cases and ${srcTot.facts} recounted facts on ${srcTot.trackers} trackers - ${srcFail.length} failures`);
+  for (const f of srcFail) console.log(`  SOURCE ${f}`);
+  failures.push(...srcFail.map((f) => `sources: ${f}`));
+}
+
 console.log(`\nSTEP 4 - the fact-built cards (every card kind - What to buy, switching, head-to-heads, What's popular, Premium vs basic, Habit, Value, both worries, looking around, Spotting the problem, Learning the category, What to look for, business case, expansion, alongside, answering a critic, the settled index - the rival cards inside them, and every By rival page): ${factCards.stats} numbers with counts and ${factCards.sentence} sentence numbers checked by fact id - ${factCards.equal} equal to their fact exactly, ${factCards.failures.length} failures; ${factCards.lists} lists checked against their selection`);
 console.log(`Product test (am43 / am44) in the fact layer's product grouping: ${productTestTotals.judged} names judged on six trackers, ${productTestTotals.differ} decided differently from the old test; ${productTestTotals.names} product names on the two cards and their rival cards checked against the grouping`);
 for (const l of productTestReport) console.log(`  ${l}`);

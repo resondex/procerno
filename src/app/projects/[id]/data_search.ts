@@ -1,10 +1,13 @@
-import type { WorkbenchView } from "@/lib/engine/workbench_rows";
+import { R, decodeFacts, type WorkbenchView } from "@/lib/engine/workbench_rows";
 import { DATA_POOL_BY_KEY, type DataPoolKey } from "@/lib/engine/facts/measure_book";
 import { STATION_LABEL } from "@/lib/engine/views";
 import { QUESTION_TYPE_LABEL } from "./question_types";
 import { DIM_NOUN, MEASURES, illegalReason, mLabel, mTip, presentPools, resolveSettings, type DimKey, type MeasureDef, type PivotSettings } from "./pivot_compute";
 import { LIBRARY, LIB_BY_ID, entryAvailable, type LibEntry } from "./table_library";
 import { MODE_LABEL, TIER_LABEL } from "./view_parts";
+
+/** Sites among this many most cited on What to buy get a "beside the other sources" hit (the cites table's cap). */
+const SOURCE_TOP = 20;
 
 /**
  * The Data page's search (2026-11-12): one box that finds what a customer
@@ -14,7 +17,8 @@ import { MODE_LABEL, TIER_LABEL } from "./view_parts";
  * It finds ready-made tables (name, description, everyday keywords), the
  * tracker's brands, buying situations, rivals, worries, question types,
  * assistants (by name, AI company, free or paid, search on or off), the
- * arguments, and the numbers (measures). Journey words (awareness,
+ * arguments, the sources the AI cites (by site name), and the numbers
+ * (measures). Journey words (awareness,
  * consideration, comparison, switching, doubts, value, loyalty...) and
  * everyday synonyms (price, worry, versus, chatgpt...) map to the question
  * types they mean.
@@ -26,7 +30,7 @@ import { MODE_LABEL, TIER_LABEL } from "./view_parts";
  * for highlighted (`focus`) or the table narrowed to it (`where`).
  */
 
-export type SearchKind = "table" | "type" | "brand" | "rival" | "buyer" | "worry" | "assistant" | "argument" | "measure";
+export type SearchKind = "table" | "type" | "brand" | "rival" | "buyer" | "worry" | "assistant" | "argument" | "source" | "measure";
 
 export const KIND_TITLE: Record<SearchKind, string> = {
   table: "Tables",
@@ -37,9 +41,10 @@ export const KIND_TITLE: Record<SearchKind, string> = {
   worry: "Worries",
   assistant: "Assistants",
   argument: "Arguments",
+  source: "Sources",
   measure: "Numbers",
 };
-const KIND_ORDER: SearchKind[] = ["table", "type", "brand", "rival", "buyer", "worry", "assistant", "argument", "measure"];
+const KIND_ORDER: SearchKind[] = ["table", "type", "brand", "rival", "buyer", "worry", "assistant", "argument", "source", "measure"];
 
 /** A row to highlight in the opened table, by its label. */
 export interface Focus {
@@ -138,6 +143,9 @@ const MEASURE_WORDS: Record<string, string[]> = {
   instead_rival: ["cheaper rival", "instead", "alternative"],
   instead_own: ["own cheaper", "trade down", "lower tier"],
   argues: ["argument", "reason", "why"],
+  cites: ["source", "citation", "cited", "website", "site", "link"],
+  cites_any: ["source", "citation", "cites", "links"],
+  cites_site_of: ["own site", "website", "homepage", "official site"],
   routed_category: ["routes to the category"],
   habit_stick: ["sticks", "loyal", "habit"],
   habit_switch: ["switch", "switches"],
@@ -177,7 +185,7 @@ function bestRow(data: WorkbenchView, pool: DataPoolKey): DimKey {
           ? ["brand", "room"]
           : ["room", "engine"];
   for (const row of tryRows) {
-    const r = resolveSettings({ pool, measures: [], row, col: "none", brand: null, arg: null }, data);
+    const r = resolveSettings({ pool, measures: [], row, col: "none", brand: null, arg: null, src: null }, data);
     if (r && r.pool === pool && r.rowDim === row) return row;
   }
   return "none";
@@ -185,7 +193,7 @@ function bestRow(data: WorkbenchView, pool: DataPoolKey): DimKey {
 
 const custom = (title: string, settings: Partial<PivotSettings> & { pool: DataPoolKey }, focus?: Focus): SearchOpen => ({
   title,
-  settings: { measures: [], row: "none", col: "none", brand: null, arg: null, where: null, ...settings },
+  settings: { measures: [], row: "none", col: "none", brand: null, arg: null, src: null, where: null, ...settings },
   focus,
 });
 
@@ -438,6 +446,53 @@ export function buildSearchIndex(data: WorkbenchView | null, brandName: string, 
     });
   }
 
+  // Sources: each site the AI cites, by its name ("nerdwallet" finds nerdwallet.com). The sites among the most cited
+  // on What to buy open the cites table with the site highlighted; every site opens its own table by assistant, on
+  // What to buy when it is cited there, else on the group of questions where it is cited most.
+  if (data.sources?.length) {
+    const facts = decodeFacts(data);
+    const byPool = new Map<string, Map<DataPoolKey, number>>();
+    facts.forEach((f, i) => {
+      const pool = data.prompts[data.facts[i][R.prompt]].pool;
+      for (const x of f.sources ?? []) {
+        const m = byPool.get(x.site) ?? new Map<DataPoolKey, number>();
+        m.set(pool, (m.get(pool) ?? 0) + 1);
+        byPool.set(x.site, m);
+      }
+    });
+    const wtb = (site: string) => byPool.get(site)?.get("what_to_buy") ?? 0;
+    const top = new Set([...byPool.keys()].filter((x) => wtb(x) > 0).sort((a, b) => wtb(b) - wtb(a) || a.localeCompare(b)).slice(0, SOURCE_TOP));
+    data.sources.forEach((site, i) => {
+      const pools = byPool.get(site);
+      if (!pools) return;
+      const pool: DataPoolKey = wtb(site) > 0 ? "what_to_buy" : [...pools.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      const where = QUESTION_TYPE_LABEL[pool];
+      const owner = data.sourceOwner?.[i] ?? -1;
+      const ownerName = owner >= 0 ? data.brands[owner]?.name : null;
+      const words = ["source", "citation", "cited", "website", "site", ...(ownerName ? [ownerName] : [])];
+      if (top.has(site)) {
+        add({
+          id: `s:${site}`,
+          kind: "source",
+          title: `${site} beside the other sources`,
+          desc: `How often the AI cites each site when buyers ask which to get, ${site} highlighted.`,
+          open: { entry: "sources_top", focus: { dim: "source", match: site } },
+          names: [site],
+          words,
+        });
+      }
+      add({
+        id: `se:${site}`,
+        kind: "source",
+        title: `${site} on each assistant`,
+        desc: `How often each assistant cites ${site} - ${where} questions.${ownerName ? ` It is ${ownerName}'s own site.` : ""}`,
+        open: custom(`${site} on each assistant`, { pool, measures: ["cites"], row: "engine", src: site }),
+        names: [site],
+        words,
+      });
+    });
+  }
+
   // Numbers (measures): each opened in the first question type that asks it.
   const seen = new Set<string>();
   const poolOrder: DataPoolKey[] = has("what_to_buy") ? ["what_to_buy", ...present.filter((p) => p !== "what_to_buy")] : present;
@@ -448,7 +503,7 @@ export function buildSearchIndex(data: WorkbenchView | null, brandName: string, 
     const key = `${name}|${pool}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const row: DimKey = m.brand ? "brand" : bestRow(data, pool);
+    const row: DimKey = m.src ? "source" : m.brand ? "brand" : bestRow(data, pool);
     const title = `${name} - ${QUESTION_TYPE_LABEL[pool]} questions`;
     add({
       id: `m:${m.id}`,

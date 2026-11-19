@@ -121,6 +121,22 @@ export const LIBRARY: LibEntry[] = [
     "Which arguments come up in each buying situation.",
     ["reasons", "why", "drivers", "attributes", "segment", "situation"]),
 
+  piv("sources_top", "Sources", "Sources the AI cites most", "what_to_buy", ["cites"], "source", "none",
+    "The sites the AI cites when buyers ask which to get, most cited first - out of the answers that cite at least one source.",
+    ["source", "sources", "citation", "citations", "cited", "website", "site", "link", "links", "reference", "publisher", "media"]),
+  piv("sources_vendor", "Sources", "Sources by AI company", "what_to_buy", ["cites"], "source", "vendor",
+    "The sites each AI company's assistants cite when buyers ask which to get.",
+    ["source", "sources", "citation", "cited", "website", "ai company", "vendor"]),
+  piv("sources_picked", "Sources", "Sources when you are picked, and when a rival is", "what_to_buy", ["cites_when_picked", "cites_when_other_picked"], "source", "none",
+    "The sites the AI cites in the answers that pick you, beside the answers that pick another brand.",
+    ["source", "sources", "citation", "cited", "website", "win", "lose", "picked"]),
+  piv("sources_own_site", "Sources", "Whose own sites the AI cites", "what_to_buy", ["cites_site_of"], "brand", "none",
+    "How often the AI cites each brand's own website when buyers ask which to get.",
+    ["own site", "website", "brand site", "homepage", "official site", "source", "citation"]),
+  piv("sources_engine", "Sources", "How often each assistant cites a source", "what_to_buy", ["cites_any"], "engine", "none",
+    "Of the answers from assistants that search the web, how often each cites at least one source.",
+    ["source", "citation", "cites", "search", "web", "links", "assistant"]),
+
   piv("worries_buyers", "Worries", "Buyers' worries", "buyers_worries", ["go_ahead", "steer_clear", "buyer_no_side", "agrees"], "worry", "none",
     "When a buyer voices a worry about you, whether the AI says go ahead, steer clear, or agrees with the worry.",
     ["doubt", "doubts", "objection", "concern", "fear", "hesitation", "risk", "complaint"]),
@@ -146,6 +162,7 @@ export const entrySettings = (e: LibEntry): PivotSettings => ({
   col: e.col ?? "none",
   brand: null,
   arg: null,
+  src: null,
   where: null,
 });
 

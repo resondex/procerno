@@ -35,8 +35,8 @@ export interface ViewData {
   project: Project;
   source: string;
   codes: AnswerCodes[];
-  /** response id -> prompt id and engine, bodies never loaded. */
-  responses: { id: string; prompt_id: string; model: string | null }[];
+  /** response id -> prompt id, engine and the URLs it cites (null = none stored), bodies never loaded. */
+  responses: { id: string; prompt_id: string; model: string | null; citations: string[] | null }[];
   prompts: Prompt[];
   intents: Intent[];
   dictionary: DictionaryEntry[];
@@ -175,7 +175,7 @@ interface SharedLoad {
   source: string;
   codes: AnswerCodes[];
   /** Already mapped to the ViewData shape - mapped once, shared. */
-  responses: { id: string; prompt_id: string; model: string | null }[];
+  responses: { id: string; prompt_id: string; model: string | null; citations: string[] | null }[];
   prompts: Prompt[];
   intents: Intent[];
   dictionary: DictionaryEntry[];
@@ -373,7 +373,7 @@ async function readShared(run: Run, project: Project, source: string): Promise<S
     source,
     codes: expanded,
     names: writtenNames(expanded),
-    responses: responses.map((r) => ({ id: r.id, prompt_id: r.prompt_id, model: r.model })),
+    responses: responses.map((r) => ({ id: r.id, prompt_id: r.prompt_id, model: r.model, citations: Array.isArray(r.citations) ? r.citations : null })),
     prompts,
     intents,
     dictionary,

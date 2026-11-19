@@ -8,7 +8,8 @@
  * Subject: a brand's dictionary entry id, "you" (the tracker - normalised to its entry id, so the id is the same
  * either way), "co:<company>" (the brands in analysis a company owns, by the dictionary's parent - the Data page's
  * company rows), "ai" (a measure about the answer), or "rival" (each answer's own named rival, head-to-heads only).
- * A parameter follows the subject: "<subject>/arg:<code>" (an argument), "<subject>/cond:<spec>" (a condition, its
+ * A parameter follows the subject: "<subject>/arg:<code>" (an argument), "<subject>/src:<site>" (a site the answer
+ * cites - never with an argument), "<subject>/cond:<spec>" (a condition, its
  * units sorted so one condition has one id), "ai/slice:<slice>" (a slice as the numerator) - measure_book.ts.
  *
  * Scope: the question types (required) and the optional fields listed in fact_id.ts (the pure part, shared with the
@@ -52,8 +53,10 @@ export function factBook(set: AnswerFactSet) {
     const ci = rest0.indexOf("/cond:");
     const condRaw = ci >= 0 ? rest0.slice(ci + 6) : null;
     const rest = ci >= 0 ? rest0.slice(0, ci) : rest0;
-    const [head, arg] = rest.split("/arg:");
-    return { head: head === "you" ? set.target.key : head, arg: arg ?? null, condRaw, sliceRaw };
+    const srcAt = rest.indexOf("/src:");
+    const src = srcAt >= 0 ? rest.slice(srcAt + 5) : null;
+    const [head, arg] = (srcAt >= 0 ? rest.slice(0, srcAt) : rest).split("/arg:");
+    return { head: head === "you" ? set.target.key : head, arg: arg ?? null, src, condRaw, sliceRaw };
   };
   /** A company subject ("co:<name>"): its brands in analysis. */
   const companyOf = (head: string): ReadonlySet<string> | null => {
@@ -85,12 +88,14 @@ export function factBook(set: AnswerFactSet) {
   }
   function compute(measureId: string, subject: string, scope: Scope, checked: boolean): Fact {
     const m = checked ? legalMeasure(measureId, scope.types) : (MEASURE_BY_ID.get(measureId) ?? legalMeasure(measureId, scope.types));
-    const { head, arg, condRaw, sliceRaw } = normSubject(subject);
+    const { head, arg, src, condRaw, sliceRaw } = normSubject(subject);
     if (m.slice && !sliceRaw) throw new Error(`fact layer: measure "${measureId}" needs a slice ("ai/slice:<slice>")`);
     if (m.subject === "ai" && head !== "ai") throw new Error(`fact layer: measure "${measureId}" is about the answer; subject must be "ai", got "${subject}"`);
     if (m.subject !== "ai" && head === "ai") throw new Error(`fact layer: measure "${measureId}" needs a brand subject`);
     if (head === "rival" && m.subject !== "brand_or_rival") throw new Error(`fact layer: measure "${measureId}" does not take the subject "rival"`);
     if (m.arg && !arg) throw new Error(`fact layer: measure "${measureId}" needs an argument ("<subject>/arg:<code>")`);
+    if (m.src && !src) throw new Error(`fact layer: measure "${measureId}" needs a source ("<subject>/src:<site>")`);
+    if (arg && src) throw new Error(`fact layer: subject "${subject}" names an argument and a source - a measure reads one or the other`);
     if (m.cond && !condRaw) throw new Error(`fact layer: measure "${measureId}" needs a condition ("<subject>/cond:<units>")`);
     // Ruling 10: a condition is counted inside one question type's scope, never pooled across types. (The worries'
     // two stages are one question type on the cards: customers' worries.)
@@ -100,11 +105,11 @@ export function factBook(set: AnswerFactSet) {
     if (head.startsWith("co:") && m.subject === "brand_or_rival") throw new Error(`fact layer: measure "${measureId}" does not take a company subject`);
     if (head !== "ai" && head !== "rival" && !head.startsWith("co:") && set.bucketOf(head) === "outside_analysis")
       throw new Error(`fact layer: "${set.nameOf(head)}" is outside of analysis (ruling 8) - never a subject`);
-    const id = (checked ? "" : "unchecked:") + factId(measureId, `${head}${arg ? `/arg:${arg}` : ""}${cond ? `/cond:${cond.key}` : ""}${sliceRaw ? `/slice:${sliceRaw}` : ""}`, scope);
+    const id = (checked ? "" : "unchecked:") + factId(measureId, `${head}${arg ? `/arg:${arg}` : ""}${src ? `/src:${src}` : ""}${cond ? `/cond:${cond.key}` : ""}${sliceRaw ? `/slice:${sliceRaw}` : ""}`, scope);
     const hit = memo.get(id);
     if (hit) return hit;
     const brands = companyOf(head);
-    const ctx: MeasureCtx = { set, brand: head === "ai" || head === "rival" || brands ? null : head, brands, rival: head === "rival", arg, cond: cond?.spec ?? null, slice: sliceRaw ? slicePred(sliceRaw, set) : null };
+    const ctx: MeasureCtx = { set, brand: head === "ai" || head === "rival" || brands ? null : head, brands, rival: head === "rival", arg, src, cond: cond?.spec ?? null, slice: sliceRaw ? slicePred(sliceRaw, set) : null };
     let k = 0;
     let n = 0;
     for (const f of rows(scope)) {
@@ -123,10 +128,10 @@ export function factBook(set: AnswerFactSet) {
     const got = hitMemo.get(f.id);
     if (got) return got;
     const m = MEASURE_BY_ID.get(measureId)!;
-    const { head, arg, condRaw, sliceRaw } = normSubject(subject);
+    const { head, arg, src, condRaw, sliceRaw } = normSubject(subject);
     const cond = condRaw ? parseCond(condRaw) : null;
     const brands = companyOf(head);
-    const ctx: MeasureCtx = { set, brand: head === "ai" || head === "rival" || brands ? null : head, brands, rival: head === "rival", arg, cond: cond?.spec ?? null, slice: sliceRaw ? slicePred(sliceRaw, set) : null };
+    const ctx: MeasureCtx = { set, brand: head === "ai" || head === "rival" || brands ? null : head, brands, rival: head === "rival", arg, src, cond: cond?.spec ?? null, slice: sliceRaw ? slicePred(sliceRaw, set) : null };
     const base: AnswerFact[] = [];
     const hit: AnswerFact[] = [];
     for (const r of rows(scope)) {

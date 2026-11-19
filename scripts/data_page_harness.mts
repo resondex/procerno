@@ -78,6 +78,20 @@ const FIXED: any[] = [
   { pool: "expansion", measures: ["growth_backs", "growth_neutral", "growth_redirects"], row: "engine", col: "none" },
   { pool: "ecosystem", measures: ["relationship_weakens", "redirected_to"], row: "none", col: "none" },
   { pool: "what_to_buy", measures: ["picked"], row: "room", col: "none", where: { dim: "vendor" } },
+  // Sources (2026-11-18): the Source dimension as a context list (a source number), as a filter (any other number),
+  // as a column, a source number read for one site with no Source dimension, and the own-site numbers.
+  { pool: "what_to_buy", measures: ["cites"], row: "source", col: "none" },
+  { pool: "what_to_buy", measures: ["cites"], row: "source", col: "mode" },
+  { pool: "what_to_buy", measures: ["cites_when_picked", "cites_when_other_picked"], row: "source", col: "none" },
+  { pool: "what_to_buy", measures: ["picked", "share_of_picks"], row: "source", col: "none" },
+  { pool: "what_to_buy", measures: ["named"], row: "brand", col: "source" },
+  { pool: "what_to_buy", measures: ["cites"], row: "vendor", col: "none", src: "@second" },
+  { pool: "what_to_buy", measures: ["cites_any", "cites_a_brand_site"], row: "engine", col: "none" },
+  { pool: "what_to_buy", measures: ["cites_site_of"], row: "brand", col: "none" },
+  { pool: "what_to_buy", measures: ["cites_site_of"], row: "parent", col: "none" },
+  { pool: "h2h", measures: ["h2h_you"], row: "source", col: "none" },
+  { pool: "customers_worries", measures: ["cites"], row: "source", col: "worry" },
+  { pool: "what_to_buy", measures: ["cites"], row: "source", col: "none", where: { dim: "vendor" } },
 ];
 if (FIXED.length < 20) throw new Error("fewer than 20 fixed built tables");
 
@@ -137,7 +151,7 @@ for (const project of projects) {
   for (const e of lib.LIBRARY) if (e.kind === "pivot" && lib.entryAvailable(e, wb)) check(wb, `library ${e.id}`, lib.entrySettings(e), "library");
   const vendor0 = wb.engines[0]?.vendor;
   for (const [i, t] of FIXED.entries()) {
-    const s = { brand: null, arg: null, ...t, where: t.where ? { ...t.where, label: vendor0 } : null };
+    const s = { brand: null, arg: null, ...t, src: t.src === "@second" ? (wb.sources[1] ?? null) : (t.src ?? null), where: t.where ? { ...t.where, label: vendor0 } : null };
     check(wb, `built ${i}`, s, "built");
   }
   // Every number once, on the first group of questions it is legal on and present in, by its natural row.
@@ -145,14 +159,15 @@ for (const project of projects) {
   for (const m of DATA_MEASURES) {
     const pool = DATA_POOLS.map((p: any) => p.key).find((k: string) => present.includes(k) && !pc.illegalReason({ ...m, brand: m.subject === "brand" }, k));
     if (!pool) continue;
-    check(wb, `measure ${m.id}`, { pool, measures: [m.id], row: m.subject === "brand" ? "brand" : m.arg ? "argument" : "engine", col: "none", brand: null, arg: null, where: null }, "built");
+    check(wb, `measure ${m.id}`, { pool, measures: [m.id], row: m.src ? "source" : m.subject === "brand" ? "brand" : m.arg ? "argument" : "engine", col: "none", brand: null, arg: null, src: null, where: null }, "built");
   }
   // The Panel lens: the payload cut to the search assistants; every cell's scope carries them.
   const search = wb.engines.filter((e: any) => e.mode === "search").map((e: any) => e.id);
   if (search.length) {
     const cut: any = computeWorkbench(data, { engines: search });
-    check(cut, "panel cut, by brand", { pool: "what_to_buy", measures: ["named", "share_of_picks"], row: "brand", col: "none", brand: null, arg: null, where: null }, "panelCut");
-    check(cut, "panel cut, h2h", { pool: "h2h", measures: ["h2h_you"], row: "rival", col: "engine", brand: null, arg: null, where: null }, "panelCut");
+    check(cut, "panel cut, by brand", { pool: "what_to_buy", measures: ["named", "share_of_picks"], row: "brand", col: "none", brand: null, arg: null, src: null, where: null }, "panelCut");
+    check(cut, "panel cut, sources", { pool: "what_to_buy", measures: ["cites"], row: "source", col: "engine", brand: null, arg: null, src: null, where: null }, "panelCut");
+    check(cut, "panel cut, h2h", { pool: "h2h", measures: ["h2h_you"], row: "rival", col: "engine", brand: null, arg: null, src: null, where: null }, "panelCut");
   }
   // Companies: the test copy sets no parent company on any brand, so the company rows are checked on a copy of the
   // dictionary that puts the three most named brands in analysis other than the tracker under one made-up parent
@@ -163,8 +178,8 @@ for (const project of projects) {
     const cwb: any = computeWorkbench(cdata, {});
     const cbook = factBook(buildAnswerFacts({ ...cdata }, {}));
     for (const e of lib.LIBRARY) if (e.kind === "pivot" && e.row === "parent" && lib.entryAvailable(e, cwb)) check(cwb, `company ${e.id}`, lib.entrySettings(e), "company", cbook);
-    check(cwb, "company, funnel", { pool: "what_to_buy", measures: ["named", "recommended", "picked", "named_first"], row: "parent", col: "none", brand: null, arg: null, where: null }, "company", cbook);
-    check(cwb, "company, by room", { pool: "what_to_buy", measures: ["share_of_picks"], row: "room", col: "parent", brand: null, arg: null, where: null }, "company", cbook);
+    check(cwb, "company, funnel", { pool: "what_to_buy", measures: ["named", "recommended", "picked", "named_first"], row: "parent", col: "none", brand: null, arg: null, src: null, where: null }, "company", cbook);
+    check(cwb, "company, by room", { pool: "what_to_buy", measures: ["share_of_picks"], row: "room", col: "parent", brand: null, arg: null, src: null, where: null }, "company", cbook);
   }
   console.log(`${project.brand}: ${tot.tables} tables so far, ${tot.cells} cells`);
 }

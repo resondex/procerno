@@ -18,8 +18,9 @@
  *     no pick at all; a pick outside the category is its own share (picks_outside_category, slice pick:outside_category);
  *  13 a premium answer with no tier stance is its own share (tier_none), never "balanced".
  *
- * Besides the fixed measures, three take a parameter in the subject (fact.ts parses it):
+ * Besides the fixed measures, four take a parameter in the subject (fact.ts parses it):
  *  - an argument: "<subject>/arg:<code>";
+ *  - a source (a site the answer cites, sources.ts): "<subject>/src:<site>" - never with an argument;
  *  - a condition: "<subject>/cond:<units>[>to:<key>][>card:<name key>][@<slice>]" (layer 1's statements);
  *  - a slice: "ai/slice:<slice>" (slices.ts) - the share of the scope's answers in the slice.
  * And any measure can be counted on a slice of a scope (Scope.when): a side of "What the answer weighs", the answers
@@ -236,6 +237,8 @@ export interface MeasureCtx {
   rival: boolean;
   /** The argument code an argument measure reads. */
   arg: string | null;
+  /** The site a source measure reads (sources.ts). */
+  src: string | null;
   /** The condition a condition measure reads. */
   cond: CondSpec | null;
   /** The slice a slice measure counts (slices.ts). */
@@ -265,6 +268,8 @@ export interface Measure {
   subject: "brand" | "ai" | "brand_or_rival";
   /** Reads an argument code (passed in the subject as "<subject>/arg:<code>"). */
   arg?: boolean;
+  /** Reads a site the answer cites (passed in the subject as "<subject>/src:<site>"); never with `arg`. */
+  src?: boolean;
   /** Reads a condition (passed in the subject as "<subject>/cond:<spec>"). */
   cond?: boolean;
   /** Reads a slice as its numerator (passed in the subject as "ai/slice:<slice>"). */
@@ -310,6 +315,10 @@ const youPick = (f: AnswerFact, c: MeasureCtx) => pickIs(f, c.set.target.key);
 const v = (f: AnswerFact, field: keyof AnswerFact["verdicts"], ...values: string[]) => values.includes(f.verdicts[field] ?? "");
 const judged = (f: AnswerFact) => v(f, "premise_verdict", "confirms", "mixed", "rebuts");
 const argues = (f: AnswerFact, c: MeasureCtx) => !!c.arg && (f.args ?? []).includes(c.arg);
+/** The answer cites at least one site (a search assistant that cited something). */
+const cited = (f: AnswerFact) => (f.sources?.length ?? 0) > 0;
+/** The answer cites the measure's site. */
+const citesSite = (f: AnswerFact, c: MeasureCtx) => !!c.src && !!f.sources?.some((s) => s.site === c.src);
 /** The answer's statements of the measure's condition (to-filter applied). */
 const condStmts = (f: AnswerFact, c: MeasureCtx) => (c.cond ? (f.conds ?? []).filter((s) => c.cond!.units.has(s.unit) && (!c.cond!.to || s.toKeys.includes(c.cond!.to))) : []);
 /** The answer states the measure's condition (and is in its numerator slice). */
@@ -523,6 +532,25 @@ export const MEASURES: readonly Measure[] = [
     print: "whole",
   },
 
+  /* -- sources: the sites a search assistant's answer cites (sources.ts; one per distinct site). An answer from an
+   * assistant that does not search is in no source measure's base. -- */
+  { id: "cites_any", name: "Cites a source", subject: "ai", legal: ALL, base: (f) => f.sources !== null, hit: cited, print: "whole" },
+  { id: "cites", name: "Cites the site", subject: "ai", src: true, legal: ALL, base: cited, hit: citesSite, print: "whole" },
+  { id: "cites_when_picked", name: "Cites the site, when the brand is the pick", subject: "brand", src: true, legal: PICK_TYPES, base: (f, c) => cited(f) && picks(f, c), hit: citesSite, print: "whole" },
+  {
+    // "Another brand" as argues_when_other_picked (ruling 2): another pick of a brand in analysis.
+    id: "cites_when_other_picked",
+    name: "Cites the site, when another brand in analysis is the pick",
+    subject: "brand",
+    src: true,
+    legal: PICK_TYPES,
+    base: (f, c) => cited(f) && inAnalysisPick(f) && !picks(f, c),
+    hit: citesSite,
+    print: "whole",
+  },
+  { id: "cites_site_of", name: "Cites the brand's own site", subject: "brand", legal: ALL, base: cited, hit: (f, c) => !!f.sources?.some((s) => isSubj(c, s.owner)), print: "whole" },
+  { id: "cites_a_brand_site", name: "Cites a brand's own site", subject: "ai", legal: ALL, base: cited, hit: (f) => !!f.sources?.some((s) => s.owner !== null), print: "whole" },
+
   /* -- conditions (layer 1's statements; ruling 4: of ALL the answers in the scope; ruling 10: one question-type
    * scope at a time - a scope pooling question types is refused) -- */
   { id: "cond_share", name: "States the condition", subject: "ai", cond: true, legal: RULE_TYPES, base: all, hit: states, print: "whole" },
@@ -605,6 +633,8 @@ export interface DataMeasure {
   subject: "brand" | "you" | "rival" | "ai";
   /** Reads an argument (the argument chosen, or the row's argument). */
   arg?: boolean;
+  /** Reads a source (the site chosen, or the row's site). */
+  src?: boolean;
   label: string;
   group: string;
   /** What it counts and out of what, in plain words. */
@@ -697,6 +727,13 @@ export const DATA_MEASURES: readonly DataMeasure[] = [
   dm("argues", "argues", "ai", "Arguments", "Argues it", "Answers that make the argument, out of every answer.", true),
   dm("argues_when_picked", "argues_when_picked", "brand", "Arguments", "Argues it, when the brand is the pick", "Of the answers that pick the brand, the share that make the argument.", true),
   dm("argues_when_other_picked", "argues_when_other_picked", "brand", "Arguments", "Argues it, when another brand is the pick", "Of the answers that pick another brand in analysis, the share that make the argument.", true),
+
+  dm("cites_any", "cites_any", "ai", "Sources", "Cites a source", "Of the answers from assistants that search the web, the share that cite at least one source."),
+  { ...dm("cites", "cites", "ai", "Sources", "Cites this source", "Of the answers that cite at least one source, the share that cite this site."), src: true },
+  { ...dm("cites_when_picked", "cites_when_picked", "brand", "Sources", "Cites this source, when the brand is the pick", "Of the answers that cite at least one source and pick the brand, the share that cite this site."), src: true },
+  { ...dm("cites_when_other_picked", "cites_when_other_picked", "brand", "Sources", "Cites this source, when another brand is the pick", "Of the answers that cite at least one source and pick another brand in analysis, the share that cite this site."), src: true },
+  dm("cites_site_of", "cites_site_of", "brand", "Sources", "Cites the brand's own site", "Of the answers that cite at least one source, the share that cite the brand's own site."),
+  dm("cites_a_brand_site", "cites_a_brand_site", "ai", "Sources", "Cites a brand's own site", "Of the answers that cite at least one source, the share that cite the own site of any brand in analysis."),
 ];
 
 export const DATA_MEASURE_BY_ID: ReadonlyMap<string, DataMeasure> = new Map(DATA_MEASURES.map((m) => [m.id, m]));

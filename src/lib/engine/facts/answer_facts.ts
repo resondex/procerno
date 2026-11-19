@@ -19,7 +19,9 @@
  *    when the tracker sells a ladder of its own lines), else nowhere;
  *  - pairings, and the decision rules as coded (condition text, the choice resolved, the product);
  *  - the conditions it states (`conds`): each rule's condition group and reason theme, read from the run's saved
- *    grouping and themes by attachConditions (conditions.ts, async - it reads the shared run themes).
+ *    grouping and themes by attachConditions (conditions.ts, async - it reads the shared run themes);
+ *  - the sites it cites (`sources`, sources.ts): null when the assistant does not search, else one entry per
+ *    distinct site with the brand in analysis whose own site it is.
  *
  * buildAnswerFacts is pure: reads ViewData, writes nothing, calls no model. Built beside the existing counters;
  * nothing on screen reads it yet.
@@ -32,6 +34,7 @@ import { corePanel, type ViewData } from "../view_data";
 import { SCHEMA_FIELDS, schemaOf, type CodeSchema } from "../views";
 import type { AnswerCodes, DictionaryEntry, Intent } from "../../types";
 import type { CondStmt } from "./conditions";
+import { siteOwnerLookup, sourcesOf, type SourceRef } from "./sources";
 
 /* ------------------------------- question types ------------------------------- */
 
@@ -140,6 +143,9 @@ export interface AnswerFact {
   /** The conditions it states, one statement per (unit, answer) - filled by attachConditions (conditions.ts) from the
    * run's saved grouping and themes; null = no decision rules on this answer (or not attached yet). */
   conds: CondStmt[] | null;
+  /** The sites the answer cites, one entry per distinct site in order of first citation (sources.ts); null = the
+   * assistant does not search (its engine mode is not search); [] = a search assistant that cited nothing. */
+  sources: SourceRef[] | null;
   /** The coded quote (the phrase the answer's verdict rests on), as coded. */
   quote?: string;
   /** Question type detail's "how they solve it" groups of an adjacent-routed awareness answer's quote, one per grouping
@@ -338,12 +344,21 @@ export function buildAnswerFacts(data: ViewData, opts: BuildOptions = {}): Answe
   }
   const core = corePanel(data);
   const keep = opts.engines ? new Set(opts.engines) : null;
-  const pool = new Map<string, { promptId: string; model: string }>();
+  const pool = new Map<string, { promptId: string; model: string; citations: string[] | null }>();
   for (const r of data.responses) {
     const model = r.model ?? data.run.model;
     if (!promptMeta.has(r.prompt_id) || !core.has(model) || (keep && !keep.has(model))) continue;
-    pool.set(r.id, { promptId: r.prompt_id, model });
+    pool.set(r.id, { promptId: r.prompt_id, model, citations: r.citations ?? null });
   }
+
+  // Whose own site a cited site is: the brands in analysis (the tracker included), by their names (sources.ts).
+  const ownerOf = siteOwnerLookup(
+    [
+      { key: targetKey, names: [project.brand, ...(entryById.get(targetKey) ? [entryById.get(targetKey)!.canonical, entryById.get(targetKey)!.display_name, ...entryById.get(targetKey)!.aliases] : [])] },
+      ...dictionary.filter((e) => e.id !== targetKey && bucketOf(e.id) === "in_analysis").map((e) => ({ key: e.id, names: [e.canonical, e.display_name, ...e.aliases] })),
+    ],
+    targetKey
+  );
 
   const facts: AnswerFact[] = [];
   for (const c of data.codes) {
@@ -365,7 +380,7 @@ export function buildAnswerFacts(data: ViewData, opts: BuildOptions = {}): Answe
     return out;
   }
 
-  function factOf(c: AnswerCodes, at: { promptId: string; model: string }, meta: NonNullable<ReturnType<typeof promptMeta.get>>): AnswerFact {
+  function factOf(c: AnswerCodes, at: { promptId: string; model: string; citations: string[] | null }, meta: NonNullable<ReturnType<typeof promptMeta.get>>): AnswerFact {
     const { intent: it, type, schema, asked, rival } = meta;
     const facets = engineFacets(at.model);
 
@@ -520,6 +535,7 @@ export function buildAnswerFacts(data: ViewData, opts: BuildOptions = {}): Answe
       pairings,
       rules,
       conds: null,
+      sources: facets.mode === "search" ? sourcesOf(at.citations, ownerOf) : null,
       quote: c.quote ?? "",
     };
   }
