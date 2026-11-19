@@ -26,6 +26,13 @@ const ROOT = process.cwd();
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "procerno-sites-"));
 const db = path.join(tmp, "copy.db");
 fs.copyFileSync(ROOT + "/data/dashboard_fixture.db", db, fs.constants.COPYFILE_FICLONE);
+// The test copy may carry live's saved site verdicts (the snapshot copies them); this test starts from none.
+{
+  const Database = (await import("better-sqlite3")).default;
+  const h = new Database(db);
+  h.prepare("DELETE FROM llm_cache WHERE key LIKE 'site_owner%'").run();
+  h.close();
+}
 process.env.DATABASE_URL = "";
 process.env.SQLITE_PATH = db;
 delete process.env.VIEW_CACHE;

@@ -125,7 +125,7 @@ for (const project of projects) {
 
 // Saved model results the views read. Keyed rows carry a project or run id in the key; reason themes are keyed by
 // content alone, so all of them come (under 1 MB).
-const PREFIXES = ["cond_keys", "ctx_judge", "question_label", "brief_write", "dict_parents", "dict_suggest", "dict_examples", "prompt_health"];
+const PREFIXES = ["cond_keys", "ctx_judge", "question_label", "brief_write", "dict_parents", "dict_suggest", "dict_examples", "prompt_health", "site_owner", "site_owner_run"];
 const ids = [...projectIds, ...runIds];
 let cacheRows = 0;
 for (const prefix of [...PREFIXES, "dossier_themes"]) {
