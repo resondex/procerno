@@ -379,6 +379,9 @@ function createDb(): Database.Database {
   if (!cols.some((c) => c.name === "code_groups")) {
     db.exec("ALTER TABLE projects ADD COLUMN code_groups TEXT");
   }
+  if (!cols.some((c) => c.name === "site_owners")) {
+    db.exec("ALTER TABLE projects ADD COLUMN site_owners TEXT");
+  }
   if (!cols.some((c) => c.name === "reasons_adapter")) {
     db.exec("ALTER TABLE projects ADD COLUMN reasons_adapter TEXT");
   }
@@ -2035,6 +2038,17 @@ export const sqliteStore: Store = {
       .prepare("SELECT code_groups FROM projects WHERE id = ?")
       .get(projectId) as { code_groups: string | null } | undefined;
     return row?.code_groups ?? null;
+  },
+
+  async getSiteOwners(projectId) {
+    const row = getDb()
+      .prepare("SELECT site_owners FROM projects WHERE id = ?")
+      .get(projectId) as { site_owners: string | null } | undefined;
+    return row?.site_owners ?? null;
+  },
+
+  async setSiteOwners(projectId, json) {
+    getDb().prepare("UPDATE projects SET site_owners = ? WHERE id = ?").run(json, projectId);
   },
 
   async setCodeGroups(projectId, groupsJson) {

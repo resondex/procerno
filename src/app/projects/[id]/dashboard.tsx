@@ -8,6 +8,7 @@ import { DictionaryOpenerContext } from "./dict_opener";
 import TaxonomyReview from "./taxonomy_review";
 import IdentifyTab, { type Suggestion } from "./identify_tab";
 import ParentsTab from "./parents_tab";
+import SitesTab from "./sites_tab";
 import {
   EnginePicker,
   type EngineOption,
@@ -106,7 +107,7 @@ export default function ProjectDashboard({
   const [launching, setLaunching] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [openModal, setOpenModal] = useState<OpenModal>(null);
-  const [dictTab, setDictTab] = useState<"identify" | "parents" | "analyze">(
+  const [dictTab, setDictTab] = useState<"identify" | "parents" | "analyze" | "sites">(
     "identify"
   );
   // Which run's results are shown. null = follow the latest complete run;
@@ -934,6 +935,7 @@ export default function ProjectDashboard({
                   ],
                   ["parents", "Parents"],
                   ["analyze", "Analyze"],
+                  ["sites", "Sites"],
                 ] as const
               ).map(([tab, label]) => (
                 <button
@@ -973,6 +975,7 @@ export default function ProjectDashboard({
               refreshDict={refreshDict}
             />
           )}
+          {dictTab === "sites" && <SitesTab projectId={id} onApplied={refreshDict} />}
           <p className="text-xs text-ink-3 mt-4">
             {pendingDict} pending ·{" "}
             {dict.filter((e) => e.status === "active").length} in analysis ·{" "}

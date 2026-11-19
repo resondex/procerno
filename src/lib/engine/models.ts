@@ -102,3 +102,8 @@ export const DOSSIER_THEME_MODEL = process.env.DOSSIER_THEME_MODEL ?? "gpt-6-lun
  * forever. A bounded rewording job, so luna; gpt-* goes through the OpenAI
  * client, anything else through Anthropic. Part of the label cache key. */
 export const QUESTION_LABEL_MODEL = pick("QUESTION_LABEL_MODEL", "gpt-6-luna");
+/** Whose own site a cited site is (site_owner.ts, so1, 2026-11-19): one batched call per ~40 never-checked sites of a
+ * run, given the category and the board (brands in analysis with their parent companies). A bounded world-knowledge
+ * judgment, so luna; OpenAI-only (a non-gpt value makes the check a no-op). Part of the per-site verdict cache key
+ * and of the source views' key. */
+export const SITE_OWNER_MODEL = pick("SITE_OWNER_MODEL", "gpt-6-luna");

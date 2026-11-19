@@ -10,6 +10,7 @@ import {
 } from "./providers";
 import { analyzePromptHealth } from "./prompt_health";
 import { prewarmContextVerdicts } from "./context_judge";
+import { prewarmSiteOwners } from "./site_owner";
 import { prewarmWrittenBriefs, writtenBriefsEntitled } from "./brief_writer";
 import { queueUnresolvedNames, runPostQueueSteps } from "./dict_queue";
 import { queueJudgedForms } from "./judged_forms";
@@ -620,6 +621,15 @@ export async function finalizeRun(runId: string): Promise<void> {
     }
   } catch (err) {
     console.error("context judge warm failed:", err);
+  }
+  // Whose own site each cited site is (site_owner.ts): the run's never-checked sites, cited by at least three answers,
+  // judged in batches so the Data page's source numbers read a saved check. No key or no codes source is a no-op.
+  // 60s soft budget, clamped like the judge warm above.
+  try {
+    const sw = await prewarmSiteOwners(run, project, { deadlineMs: Math.min(Date.now() + 60_000, finalizeStart + 240_000) });
+    if (sw.judged > 0 || sw.failed > 0) console.log(`site owner check: ${sw.judged} judged, ${sw.cached} cached, ${sw.failed} left of ${sw.sites} sites`);
+  } catch (err) {
+    console.error("site owner check failed:", err);
   }
   // The question check, then - on a tracker's first wave - the wording
   // review: one suggested replacement per flagged wording, and with two

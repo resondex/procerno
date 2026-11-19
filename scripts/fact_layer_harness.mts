@@ -2060,11 +2060,73 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
   eq("owner, never a part of a word (2)", owner("oneplusreview.com"), null);
   eq("owner, too short", owner("ion.com"), null);
   eq("owner, nobody's", owner("nerdwallet.com"), null);
-  eq("sources dedupe per site", sourcesOf(["https://a.nerdwallet.com/1", "https://www.nerdwallet.com/2", "https://amex.com/x", "garbage"], owner), [
-    { site: "nerdwallet.com", owner: null },
-    { site: "amex.com", owner: "T" },
+  const byName = (site: string) => (owner(site) ? [owner(site)!] : []);
+  eq("sources dedupe per site", sourcesOf(["https://a.nerdwallet.com/1", "https://www.nerdwallet.com/2", "https://amex.com/x", "garbage"], byName), [
+    { site: "nerdwallet.com", owners: [] },
+    { site: "amex.com", owners: ["T"] },
   ]);
   // max/hbo are under 4 characters: the length floor, not the parenthetical, keeps them out (checked above).
+
+  // The owner rules in order (2026-11-19): entered > model check > name match; each, when it exists for a site,
+  // replaces what is below it - an empty list too. Several owners; ids not on the board dropped; board order kept.
+  {
+    const { siteOwnerResolver, siteBoard } = await import(ROOT + "/src/lib/engine/facts/sources.ts");
+    const brands = [
+      { key: "T", names: ["Jira"] },
+      { key: "A", names: ["Alpha"] },
+      { key: "B", names: ["Bravo"] },
+    ];
+    const r = siteOwnerResolver(brands, "T", {
+      entered: { "maker.com": ["B", "T"], "alpha.com": [], "gone.com": ["X", "A"] },
+      checked: { "maker.com": ["A"], "jira.com": [], "parent.com": ["A", "B", "T"], "alpha.com": ["A"], "bravo.com": ["NOPE"] },
+    });
+    eq("resolver, entered wins over the check", r("maker.com"), { owners: ["T", "B"], from: "entered" });
+    eq("resolver, entered empty stops the fall-through", r("alpha.com"), { owners: [], from: "entered" });
+    eq("resolver, entered ids off the board dropped", r("gone.com"), { owners: ["A"], from: "entered" });
+    eq("resolver, check empty stops the name match", r("jira.com"), { owners: [], from: "check" });
+    eq("resolver, check with several owners, board order", r("parent.com"), { owners: ["T", "A", "B"], from: "check" });
+    eq("resolver, check names gone from the board", r("bravo.com"), { owners: [], from: "check" });
+    eq("resolver, the name match below both", r("alpha.co.uk"), { owners: ["A"], from: "name" });
+    eq("resolver, nobody's", r("nerdwallet.com"), { owners: [], from: null });
+    eq("resolver, no inputs = the name match", siteOwnerResolver(brands, "T")("bravo.com"), { owners: ["B"], from: "name" });
+    const board = siteBoard(
+      "Jira",
+      [
+        { id: "o", status: "active", analyzed: true, canonical: "Other", display_name: null, aliases: [], parent: null },
+        { id: "t", status: "active", analyzed: true, canonical: "jira", display_name: "Jira", aliases: ["jira software"], parent: "Atlassian" },
+        { id: "x", status: "active", analyzed: false, canonical: "Xenon", display_name: null, aliases: [], parent: null },
+        { id: "p", status: "pending", analyzed: true, canonical: "Pend", display_name: null, aliases: [], parent: null },
+        { id: "c", status: "active", analyzed: true, canonical: "confluence", display_name: "Confluence", aliases: [], parent: "Atlassian" },
+      ],
+      "t"
+    );
+    eq("board, the tracker first then in analysis", board.map((b: any) => [b.key, b.name, b.client, b.parent]), [
+      ["t", "Jira", true, "Atlassian"],
+      ["o", "Other", false, null],
+      ["c", "Confluence", false, "Atlassian"],
+    ]);
+    const { resolveVerdictNames, keepBoardNames } = await import(ROOT + "/src/lib/engine/site_owner.ts");
+    eq("verdict names resolve by match key", resolveVerdictNames(["Confluence", "jira software", "Gone Brand", "CONFLUENCE"], board), ["c", "t"]);
+    eq("off-board names dropped", keepBoardNames(["Confluence", " Jira ", "jira", "Atlassian", "Confluence"], board), ["Confluence", "Jira"]);
+    const so = await import(ROOT + "/src/lib/site_owners.ts");
+    eq("site owners, bad json", so.parseSiteOwners("{not json"), {});
+    eq("site owners, not an object", so.parseSiteOwners("[1,2]"), {});
+    eq("site owners, bad records left out", so.parseSiteOwners(JSON.stringify({ "a.com": { owners: ["x", "x", 3], at: "t" }, "www.b.com": { owners: [] }, "c.com": "no", "d.com": { owners: [] } })), {
+      "a.com": { owners: ["x"], at: "t" },
+      "d.com": { owners: [], at: "" },
+    });
+    eq("site owners, entered map", so.enteredOwners({ "a.com": { owners: ["x"], at: "t" } }), { "a.com": ["x"] });
+    eq("site owners, replace keeps sorted keys", Object.keys(so.withSiteOwners({ "z.com": { owners: [], at: "" } }, "a.com", ["x", "x"], "t")), ["a.com", "z.com"]);
+    eq("site owners, replace dedupes", so.withSiteOwners({}, "a.com", ["x", "x"], "t"), { "a.com": { owners: ["x"], at: "t" } });
+    eq("add owner", so.addOwner(["a"], "b"), ["a", "b"]);
+    eq("add owner, already there", so.addOwner(["a", "b"], "a"), ["a", "b"]);
+    eq("remove owner", so.removeOwner(["a", "b"], "a"), ["b"]);
+    eq("remove the last owner = nobody's", so.removeOwner(["a"], "a"), []);
+    eq("site from a pasted link", so.siteFromInput(" https://help.Example.co.uk/x?y=1 "), { site: "example.co.uk" });
+    eq("site from a bare domain", so.siteFromInput("max.com"), { site: "max.com" });
+    eq("site from nothing", "error" in so.siteFromInput("  "), true);
+    eq("site from text", "error" in so.siteFromInput("not a site"), true);
+  }
 
   const Better = (await import("better-sqlite3")).default;
   const db = new Better(process.env.SQLITE_PATH!, { readonly: true, fileMustExist: true });

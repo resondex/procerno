@@ -1,17 +1,22 @@
 /**
  * Sources (fact layer, layer 1, 2026-11-18): the sites a search assistant's answer cites. Each answer's citations
  * (responses.citations, a list of URLs) come down to one entry per distinct SITE - three pages of one site count
- * once - and each site carries the brand in analysis whose own site it is, when one is.
+ * once - and each site carries the brands in analysis whose own site it is (none, one or several).
  *
  *  - The site is the registrable domain, lower case: the last two labels of the host name, or the last three when
  *    the last two are a known two-part public suffix (co.uk, com.au ...). "www." and every other subdomain go:
  *    support.atlassian.com -> atlassian.com, uk.pcmag.com -> pcmag.com, finance.yahoo.com -> yahoo.com. A URL that
  *    does not parse to a host name with a dot is skipped.
- *  - The owner is mechanical, never a model: the site's main label (the site without its suffix), with everything
- *    but letters and digits taken out, must EQUAL a brand's name in the same compact form - its canonical name,
- *    display name, an alias, or a name declared in parentheses ("Max (HBO)") - at least 4 characters long. Exact
- *    equality only, never a part of a word. When two brands match, the tracker's own brand wins, then the longer
- *    matched form, then the entry id.
+ *  - Whose own site it is (2026-11-19, siteOwnerResolver), in this order - each rule, when it exists for the site,
+ *    fully replaces what is below it (an empty list included: "nobody's" stops the fall-through):
+ *      1. what a person entered for this tracker (projects.site_owners, lib/site_owners.ts);
+ *      2. the saved model check (engine/site_owner.ts), its brand names resolved through the current dictionary;
+ *      3. the name match, mechanical: the site's main label (the site without its suffix), with everything but
+ *         letters and digits taken out, must EQUAL a brand's name in the same compact form - its canonical name,
+ *         display name, an alias, or a name declared in parentheses ("Max (HBO)") - at least 4 characters long.
+ *         Exact equality only, never a part of a word. When two brands match, the tracker's own brand wins, then
+ *         the longer matched form, then the entry id. The name match gives one owner at most.
+ *    Owners are always brands in analysis (the tracker included), in board order; any other id is dropped.
  *
  * Pure and browser-safe: no imports.
  */
@@ -19,8 +24,19 @@
 export interface SourceRef {
   /** The site, e.g. "nerdwallet.com". */
   site: string;
-  /** The dictionary entry id of the brand in analysis whose own site it is; null = nobody's. */
-  owner: string | null;
+  /** The dictionary entry ids of the brands in analysis whose own site it is, in board order; [] = nobody's. */
+  owners: string[];
+}
+
+/** Where a site's owners come from (siteOwnerResolver); null = nobody's by every rule. */
+export type OwnerFrom = "entered" | "check" | "name";
+
+/** The two rules above the name match, as resolved entry ids per site. */
+export interface SiteOwnerInputs {
+  /** What a person entered for this tracker: site -> entry ids. */
+  entered?: Readonly<Record<string, readonly string[]>>;
+  /** The saved model check: site -> entry ids (its brand names already resolved). */
+  checked?: Readonly<Record<string, readonly string[]>>;
 }
 
 /** The two-part public suffixes a site keeps three labels for (a short explicit list, not the full public list). */
@@ -86,7 +102,7 @@ export function ownerForms(names: readonly (string | null | undefined)[]): strin
 }
 
 /**
- * The owner lookup for one tracker: site -> the entry id of the brand in analysis whose own site it is, or null.
+ * The name match alone (rule 3): site -> the entry id of the brand in analysis whose own site it is, or null.
  * `brands` are the brands in analysis (the tracker included) with the names each is matched on.
  */
 export function siteOwnerLookup(brands: readonly { key: string; names: readonly (string | null | undefined)[] }[], targetKey: string): (site: string) => string | null {
@@ -114,15 +130,98 @@ export function siteOwnerLookup(brands: readonly { key: string; names: readonly 
   };
 }
 
+/**
+ * The full owner rule for one tracker (the order in the header): site -> { owners, from }. `brands` are the brands
+ * in analysis in board order (the tracker first), each with the names it is matched on; ids in `inputs` that are not
+ * one of them are dropped.
+ */
+export function siteOwnerResolver(
+  brands: readonly { key: string; names: readonly (string | null | undefined)[] }[],
+  targetKey: string,
+  inputs: SiteOwnerInputs = {}
+): (site: string) => { owners: string[]; from: OwnerFrom | null } {
+  const order = new Map(brands.map((b, i) => [b.key, i]));
+  const keep = (ids: readonly string[]) => [...new Set(ids.filter((id) => order.has(id)))].sort((a, b) => order.get(a)! - order.get(b)!);
+  const byName = siteOwnerLookup(brands, targetKey);
+  const has = (m: SiteOwnerInputs["entered"], site: string) => !!m && Object.prototype.hasOwnProperty.call(m, site);
+  const memo = new Map<string, { owners: string[]; from: OwnerFrom | null }>();
+  return (site) => {
+    let hit = memo.get(site);
+    if (!hit) {
+      if (has(inputs.entered, site)) hit = { owners: keep(inputs.entered![site]), from: "entered" };
+      else if (has(inputs.checked, site)) hit = { owners: keep(inputs.checked![site]), from: "check" };
+      else {
+        const one = byName(site);
+        hit = one ? { owners: [one], from: "name" } : { owners: [], from: null };
+      }
+      memo.set(site, hit);
+    }
+    return hit;
+  };
+}
+
 /** One answer's sources: one entry per distinct site, in order of first citation. */
-export function sourcesOf(citations: readonly string[] | null | undefined, ownerOf: (site: string) => string | null): SourceRef[] {
+export function sourcesOf(citations: readonly string[] | null | undefined, ownersOf: (site: string) => readonly string[]): SourceRef[] {
   const out: SourceRef[] = [];
   const seen = new Set<string>();
   for (const u of citations ?? []) {
     const site = siteOf(u);
     if (!site || seen.has(site)) continue;
     seen.add(site);
-    out.push({ site, owner: ownerOf(site) });
+    out.push({ site, owners: [...ownersOf(site)] });
+  }
+  return out;
+}
+
+/** A dictionary entry as the board reads it (a structural subset of DictionaryEntry - this module imports nothing). */
+export interface BoardEntry {
+  id: string;
+  status: string;
+  analyzed?: boolean | null;
+  canonical: string;
+  display_name?: string | null;
+  aliases: readonly string[];
+  parent?: string | null;
+}
+
+/** A brand in analysis as the site rules read it. */
+export interface BoardBrand {
+  key: string;
+  /** The name shown: the tracker's brand as configured; else the display name, else the canonical name. */
+  name: string;
+  /** Every name it is matched on. */
+  names: string[];
+  /** Its parent company on the board, when one is set. */
+  parent: string | null;
+  /** The tracker's own brand. */
+  client: boolean;
+}
+
+/**
+ * The brands in analysis, the tracker first - the set answer_facts.ts calls "in analysis" (the tracker, and every
+ * active entry not switched out of analysis), in dictionary order after the tracker. The name match reads `names`;
+ * the model check and the Sites tab show `name`.
+ */
+export function siteBoard(brand: string, entries: readonly BoardEntry[], targetKey: string): BoardBrand[] {
+  const t = entries.find((e) => e.id === targetKey);
+  const out: BoardBrand[] = [
+    {
+      key: targetKey,
+      name: brand,
+      names: [brand, ...(t ? [t.canonical, t.display_name ?? null, ...t.aliases] : [])].filter((x): x is string => !!x),
+      parent: t?.parent ?? null,
+      client: true,
+    },
+  ];
+  for (const e of entries) {
+    if (e.id === targetKey || e.status !== "active" || e.analyzed === false) continue;
+    out.push({
+      key: e.id,
+      name: e.display_name ?? e.canonical,
+      names: [e.canonical, e.display_name ?? null, ...e.aliases].filter((x): x is string => !!x),
+      parent: e.parent ?? null,
+      client: false,
+    });
   }
   return out;
 }

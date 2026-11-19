@@ -548,8 +548,8 @@ export const MEASURES: readonly Measure[] = [
     hit: citesSite,
     print: "whole",
   },
-  { id: "cites_site_of", name: "Cites the brand's own site", subject: "brand", legal: ALL, base: cited, hit: (f, c) => !!f.sources?.some((s) => isSubj(c, s.owner)), print: "whole" },
-  { id: "cites_a_brand_site", name: "Cites a brand's own site", subject: "ai", legal: ALL, base: cited, hit: (f) => !!f.sources?.some((s) => s.owner !== null), print: "whole" },
+  { id: "cites_site_of", name: "Cites the brand's own site", subject: "brand", legal: ALL, base: cited, hit: (f, c) => !!f.sources?.some((s) => s.owners.some((o) => isSubj(c, o))), print: "whole" },
+  { id: "cites_a_brand_site", name: "Cites a brand's own site", subject: "ai", legal: ALL, base: cited, hit: (f) => !!f.sources?.some((s) => s.owners.length > 0), print: "whole" },
 
   /* -- conditions (layer 1's statements; ruling 4: of ALL the answers in the scope; ruling 10: one question-type
    * scope at a time - a scope pooling question types is refused) -- */

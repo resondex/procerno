@@ -7,6 +7,7 @@ import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION, primeContextVerdicts } from
 import { RESOLVE_VERSION, expandCoNamed, writtenNames } from "./brand_resolve";
 import { ENGINES, engineFacets, type EngineFacets } from "./providers";
 import type { ConditionKeysCache } from "./condition_groups";
+import { loadSiteOwnerInputs, siteOwnerStamp, type SiteOwnerLoad } from "./site_owner";
 import type { AnswerCodes, DictionaryEntry, Intent, Project, Prompt, Run } from "../types";
 
 /**
@@ -47,6 +48,10 @@ export interface ViewData {
   setupDecision?: string | null;
   /** projects.code_groups JSON - loaded only for views that ask for it. */
   codeGroups?: string | null;
+  /** Whose own site each cited site is, by the two rules above the name match (facts/sources.ts): what a person
+   * entered and the run's saved model check, resolved to entry ids - loaded only for views that opt in
+   * (ViewExtras.siteOwners); absent = the name match alone. */
+  siteOwners?: SiteOwnerLoad;
   /** Context-judge verdicts (matchKey -> maker) for names the dictionary
    * cannot place - loaded only for views that opt in. */
   judged?: Map<string, string>;
@@ -67,6 +72,9 @@ export interface ViewExtras {
   setupDecision?: boolean;
   codeGroups?: boolean;
   judge?: boolean;
+  /** The site owners a person entered and the run's saved model check (site_owner.ts) - only for views that read
+   * whose own site a source is (the workbench). Their stamp rides the key (siteOwnerStamp). */
+  siteOwners?: boolean;
 }
 
 /** One coded answer in a view's pool, with its cell and engine. */
@@ -410,6 +418,7 @@ export async function loadViewData(
     ...(setupDecision !== undefined && { setupDecision }),
     ...(codeGroups !== undefined && { codeGroups }),
   };
+  if (opts.siteOwners) data.siteOwners = await loadSiteOwnerInputs(project, run.id, dictionary);
   if (opts.judge) {
     const jkey = `${key}:judge`;
     const primed = judgeMemo.get(jkey, () =>
@@ -469,6 +478,7 @@ export async function cachedView<T>(
   if (opts.setupDecision) extras.push(await store.getSetupDecision(project.id));
   if (opts.codeGroups) extras.push(await store.getCodeGroups(project.id));
   if (opts.judge) extras.push(`ctx:${CONTEXT_JUDGE_VERSION}:${CONTEXT_JUDGE_MODEL}`);
+  if (opts.siteOwners) extras.push(await siteOwnerStamp(project.id, run.id));
   // Every view resolves names through brand_resolve; its version re-keys them all.
   extras.push(`resolve:${RESOLVE_VERSION}`);
   const projectHash = createHash("sha256")

@@ -29,7 +29,7 @@ export type { WbBrand, WbEngine, WbFact, WbPrompt, WorkbenchView } from "./workb
  *  - price: null = not a price question, else [0 a rival / 1 only your own option / 2 nowhere (ruling 3), the rivals
  *    it recommends instead];
  *  - sources: null = the assistant does not search, else the indexes into `sources` of the sites it cites (one per
- *    distinct site, facts/sources.ts); `sourceOwner` says whose own site each is.
+ *    distinct site, facts/sources.ts); `sourceOwner` says whose own site each is (none, one or several brands).
  *
  * The first version's rollups (rows / extra / doubt / codes) are gone: nothing read them.
  */
@@ -56,7 +56,7 @@ export function computeWorkbench(data: ViewData, request: ViewRequest = {}): Wor
     see(f.rival?.key, f.rival?.name);
     for (const b of f.sent?.brands ?? []) see(b.key, b.name);
     for (const r of f.price?.rivals ?? []) see(r.key, r.name);
-    for (const x of f.sources ?? []) see(x.owner, x.owner ? set.nameOf(x.owner) : null);
+    for (const x of f.sources ?? []) for (const o of x.owners) see(o, set.nameOf(o));
   }
   const brandKeys = [...named.keys()].sort((a, b) => (named.get(b) ?? 0) - (named.get(a) ?? 0) || a.localeCompare(b));
   const brandIdx = new Map(brandKeys.map((k, i) => [k, i]));
@@ -128,18 +128,15 @@ export function computeWorkbench(data: ViewData, request: ViewRequest = {}): Wor
 
   // Sources: the sites cited, most cited first, each with the brand whose own site it is.
   const srcCount = new Map<string, number>();
-  const srcOwner = new Map<string, string | null>();
+  const srcOwner = new Map<string, string[]>();
   for (const f of set.facts)
     for (const x of f.sources ?? []) {
       srcCount.set(x.site, (srcCount.get(x.site) ?? 0) + 1);
-      srcOwner.set(x.site, x.owner);
+      srcOwner.set(x.site, x.owners);
     }
   const sources = [...srcCount.keys()].sort((a, b) => (srcCount.get(b) ?? 0) - (srcCount.get(a) ?? 0) || a.localeCompare(b));
   const srcIdx = new Map(sources.map((x, i) => [x, i]));
-  const sourceOwner = sources.map((x) => {
-    const o = srcOwner.get(x);
-    return o ? (brandIdx.get(o) ?? -1) : -1;
-  });
+  const sourceOwner = sources.map((x) => (srcOwner.get(x) ?? []).map((o) => brandIdx.get(o)).filter((i): i is number => i !== undefined));
 
   const responseIds: string[] = [];
   const facts: WbFact[] = set.facts.map((f) => {
@@ -209,8 +206,11 @@ export function computeWorkbench(data: ViewData, request: ViewRequest = {}): Wor
 // browser with the measure book; the first version's rollups (rows / extra / doubt / codes) are dropped.
 // wb8 (2026-11-18): the sites each answer cites (facts/sources.ts) and whose own site each is - the Data page's
 // Source dimension and the source numbers.
-const WORKBENCH_VERSION = "wb8";
+// wb9 (2026-11-19): a site belongs to several brands (sourceOwner is a list per site), and whose it is comes from
+// what a person entered, else the saved model check (engine/site_owner.ts), else the name match - both records ride
+// the key (cachedView's siteOwners extra).
+const WORKBENCH_VERSION = "wb9";
 export function computeWorkbenchCached(run: Run, project: Project, request: ViewRequest = {}): Promise<WorkbenchView | null> {
   const r = requestOf(request);
-  return cachedView("workbench", WORKBENCH_VERSION, run, project, (d) => computeWorkbench(d, r), { judge: true, setupDecision: true }, r);
+  return cachedView("workbench", WORKBENCH_VERSION, run, project, (d) => computeWorkbench(d, r), { judge: true, setupDecision: true, siteOwners: true }, r);
 }

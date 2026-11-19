@@ -375,6 +375,8 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS codes_source TEXT`;
       // projects.code_groups (2026-10-27): the reasons view's display rollup map.
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS code_groups TEXT`;
+      // projects.site_owners (2026-11-19): the sites a person entered as brands' own, JSON (lib/site_owners.ts).
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS site_owners TEXT`;
       // projects.analysis_decision (2026-11-03): the analysis tier's portfolio
       // record (suggested vs decided triage per position), JSON.
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS analysis_decision TEXT`;
@@ -1793,6 +1795,17 @@ export const pgStore: Store = {
   async setCodeGroups(projectId, groupsJson) {
     const sql = await db();
     await sql`UPDATE projects SET code_groups = ${groupsJson} WHERE id = ${projectId}`;
+  },
+
+  async getSiteOwners(projectId) {
+    const sql = await db();
+    const rows = await sql`SELECT site_owners FROM projects WHERE id = ${projectId}`;
+    return (rows[0]?.site_owners as string | null | undefined) ?? null;
+  },
+
+  async setSiteOwners(projectId, json) {
+    const sql = await db();
+    await sql`UPDATE projects SET site_owners = ${json} WHERE id = ${projectId}`;
   },
 
   async getAnalysisDecision(projectId) {

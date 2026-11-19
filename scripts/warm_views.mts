@@ -17,7 +17,8 @@
  * fact sheet is unchanged is a cache hit and free, a re-keyed one costs one
  * Opus write (~6 cents) - so a deploy that changed no brief wording warms
  * written for $0, and a wording deploy pays what the first click would
- * have. Pass --no-written to skip that part.
+ * have. Pass --no-written to skip that part. Before the passes it runs the site owner check on each tracker's
+ * shown run (site_owner.ts prewarmSiteOwners): never-checked sites cost one gpt-6-luna call per ~40 (pennies).
  */
 import fs from "node:fs";
 
@@ -46,6 +47,28 @@ const projects = (await store.listProjects()).filter(
   (p: { brand: string; archived_at?: string | null }) =>
     !p.archived_at && (filters.length === 0 || filters.some((f) => p.brand.toLowerCase().includes(f)))
 );
+
+// Whose own site each cited site is (site_owner.ts), BEFORE the view passes: the workbench's key carries the run's
+// verdict snapshot, so a check that lands after the passes would re-key it again. SPENDS on never-checked sites
+// (views:site_owner, pennies a tracker); a warm tracker makes no call.
+const { prewarmSiteOwners } = await import(process.cwd() + "/src/lib/engine/site_owner.ts");
+for (const project of projects) {
+  const source = await store.getCodesSource(project.id);
+  if (!source) continue;
+  const runs = await store.listRuns(project.id);
+  let run = runs.find((r: { status: string }) => r.status === "complete") ?? null;
+  if (!run) for (const r of runs) if ((await store.countAnswerCodes(r.id, source)) > 0) { run = r; break; }
+  if (!run) continue;
+  const t0 = Date.now();
+  try {
+    const w = await prewarmSiteOwners(run, project, { deadlineMs: Date.now() + 5 * 60 * 1000 });
+    console.log(`[sites] ${project.brand}: ${w.judged} judged, ${w.cached} already checked, ${w.failed} left, of ${w.sites} sites (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+    if (w.failed > 0) process.exitCode = 1;
+  } catch (e) {
+    console.log(`[sites] ${project.brand}: FAILED (${e instanceof Error ? e.message.slice(0, 80) : e})`);
+    process.exitCode = 1;
+  }
+}
 
 // Two passes: a view computed while the context judge is still working its
 // name tail is served but deliberately NOT cached (judgeIncomplete), so the

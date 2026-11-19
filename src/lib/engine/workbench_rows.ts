@@ -7,7 +7,7 @@
  * Only the fields the measures read are carried. Left out on purpose: brands outside of analysis among the brands
  * an answer names (ruling 8 - never a subject; the measures that read the bucket read only brands in analysis), the
  * written forms, conditions, pairings, decision rules and products (no Data page number reads them). The sites an
- * answer cites ride as indexes into `sources` (null = the assistant does not search), each site with its owner.
+ * answer cites ride as indexes into `sources` (null = the assistant does not search), each site with its owners.
  */
 import type { AnswerFact, Bucket, NamedBrand, QuestionType } from "./facts/answer_facts";
 import { VERDICT_FIELDS, VERDICT_VALUES } from "./facts/basics";
@@ -97,8 +97,8 @@ export interface WorkbenchView {
   args: string[];
   /** The sites the answers cite (facts/sources.ts), most cited first. */
   sources: string[];
-  /** Whose own site each source is: an index into `brands`, -1 = nobody's (aligned with `sources`). */
-  sourceOwner: number[];
+  /** Whose own site each source is: indexes into `brands`, [] = nobody's (aligned with `sources`). */
+  sourceOwner: number[][];
   /** Answer ids, index-addressed by facts (the evidence drill). */
   responseIds: string[];
   facts: WbFact[];
@@ -151,7 +151,7 @@ export function decodeFacts(view: WorkbenchView): AnswerFact[] {
       pairings: null,
       rules: null,
       conds: null,
-      sources: srcs ? srcs.map((i) => ({ site: view.sources[i], owner: view.sourceOwner[i] >= 0 ? B[view.sourceOwner[i]].key : null })) : null,
+      sources: srcs ? srcs.map((i) => ({ site: view.sources[i], owners: (view.sourceOwner[i] ?? []).map((j) => B[j].key) })) : null,
     };
   });
   memo.set(view, out);

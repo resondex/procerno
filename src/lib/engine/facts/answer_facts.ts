@@ -21,7 +21,8 @@
  *  - the conditions it states (`conds`): each rule's condition group and reason theme, read from the run's saved
  *    grouping and themes by attachConditions (conditions.ts, async - it reads the shared run themes);
  *  - the sites it cites (`sources`, sources.ts): null when the assistant does not search, else one entry per
- *    distinct site with the brand in analysis whose own site it is.
+ *    distinct site with the brands in analysis whose own site it is (what a person entered, else the saved model
+ *    check - both in `data.siteOwners` when the view loads them - else the name match).
  *
  * buildAnswerFacts is pure: reads ViewData, writes nothing, calls no model. Built beside the existing counters;
  * nothing on screen reads it yet.
@@ -34,7 +35,7 @@ import { corePanel, type ViewData } from "../view_data";
 import { SCHEMA_FIELDS, schemaOf, type CodeSchema } from "../views";
 import type { AnswerCodes, DictionaryEntry, Intent } from "../../types";
 import type { CondStmt } from "./conditions";
-import { siteOwnerLookup, sourcesOf, type SourceRef } from "./sources";
+import { siteBoard, siteOwnerResolver, sourcesOf, type SourceRef } from "./sources";
 
 /* ------------------------------- question types ------------------------------- */
 
@@ -351,14 +352,10 @@ export function buildAnswerFacts(data: ViewData, opts: BuildOptions = {}): Answe
     pool.set(r.id, { promptId: r.prompt_id, model, citations: r.citations ?? null });
   }
 
-  // Whose own site a cited site is: the brands in analysis (the tracker included), by their names (sources.ts).
-  const ownerOf = siteOwnerLookup(
-    [
-      { key: targetKey, names: [project.brand, ...(entryById.get(targetKey) ? [entryById.get(targetKey)!.canonical, entryById.get(targetKey)!.display_name, ...entryById.get(targetKey)!.aliases] : [])] },
-      ...dictionary.filter((e) => e.id !== targetKey && bucketOf(e.id) === "in_analysis").map((e) => ({ key: e.id, names: [e.canonical, e.display_name, ...e.aliases] })),
-    ],
-    targetKey
-  );
+  // Whose own site a cited site is (sources.ts): what a person entered, else the saved model check (both loaded only
+  // for a view that opts into siteOwners), else the name match - over the brands in analysis, the tracker included.
+  const siteOwners = siteOwnerResolver(siteBoard(project.brand, dictionary, targetKey), targetKey, data.siteOwners ?? {});
+  const ownersOf = (site: string) => siteOwners(site).owners;
 
   const facts: AnswerFact[] = [];
   for (const c of data.codes) {
@@ -535,7 +532,7 @@ export function buildAnswerFacts(data: ViewData, opts: BuildOptions = {}): Answe
       pairings,
       rules,
       conds: null,
-      sources: facets.mode === "search" ? sourcesOf(at.citations, ownerOf) : null,
+      sources: facets.mode === "search" ? sourcesOf(at.citations, ownersOf) : null,
       quote: c.quote ?? "",
     };
   }

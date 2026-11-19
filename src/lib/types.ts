@@ -1238,6 +1238,11 @@ export interface Store {
    * null = no map (the view shows the fine codes only). Never a labeling grain. */
   getCodeGroups(projectId: string): Promise<string | null>;
   setCodeGroups(projectId: string, groupsJson: string | null): Promise<void>;
+  /** projects.site_owners (2026-11-19): the sites a person entered as brands' own, JSON
+   * {[site]: {owners: entry ids, at}} (lib/site_owners.ts). Not part of the Project payload; read by the views that
+   * count sources and by the Sites tab. null = nothing entered. */
+  getSiteOwners(projectId: string): Promise<string | null>;
+  setSiteOwners(projectId: string, json: string | null): Promise<void>;
   /** projects.analysis_decision (2026-11-03): the analysis tier's portfolio
    * record - suggested vs decided triage per position plus the playbook
    * flag, stored as JSON (AnalysisDecision in engine/analysis_types). Not

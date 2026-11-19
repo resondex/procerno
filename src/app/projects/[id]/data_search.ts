@@ -191,6 +191,13 @@ function bestRow(data: WorkbenchView, pool: DataPoolKey): DimKey {
   return "none";
 }
 
+/** " It is X's own site." / " It is the own site of A, B and C." / "" - the search hit's note on whose site it is. */
+function ownSiteOf(names: string[]): string {
+  if (names.length === 0) return "";
+  if (names.length === 1) return ` It is ${names[0]}'s own site.`;
+  return ` It is the own site of ${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}.`;
+}
+
 const custom = (title: string, settings: Partial<PivotSettings> & { pool: DataPoolKey }, focus?: Focus): SearchOpen => ({
   title,
   settings: { measures: [], row: "none", col: "none", brand: null, arg: null, src: null, where: null, ...settings },
@@ -467,9 +474,8 @@ export function buildSearchIndex(data: WorkbenchView | null, brandName: string, 
       if (!pools) return;
       const pool: DataPoolKey = wtb(site) > 0 ? "what_to_buy" : [...pools.entries()].sort((a, b) => b[1] - a[1])[0][0];
       const where = QUESTION_TYPE_LABEL[pool];
-      const owner = data.sourceOwner?.[i] ?? -1;
-      const ownerName = owner >= 0 ? data.brands[owner]?.name : null;
-      const words = ["source", "citation", "cited", "website", "site", ...(ownerName ? [ownerName] : [])];
+      const ownerNames = (data.sourceOwner?.[i] ?? []).map((j) => data.brands[j]?.name).filter((x): x is string => !!x);
+      const words = ["source", "citation", "cited", "website", "site", ...ownerNames];
       if (top.has(site)) {
         add({
           id: `s:${site}`,
@@ -485,7 +491,7 @@ export function buildSearchIndex(data: WorkbenchView | null, brandName: string, 
         id: `se:${site}`,
         kind: "source",
         title: `${site} on each assistant`,
-        desc: `How often each assistant cites ${site} - ${where} questions.${ownerName ? ` It is ${ownerName}'s own site.` : ""}`,
+        desc: `How often each assistant cites ${site} - ${where} questions.${ownSiteOf(ownerNames)}`,
         open: custom(`${site} on each assistant`, { pool, measures: ["cites"], row: "engine", src: site }),
         names: [site],
         words,
